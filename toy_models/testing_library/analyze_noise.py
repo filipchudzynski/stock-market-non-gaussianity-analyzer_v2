@@ -85,7 +85,7 @@ def detrend_series(data, detrender, window):
 # ============================================================
 #   MAIN FUNCTION
 # ============================================================
-def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETREND_FACTOR, title_prefix="Noise"):
+def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETREND_FACTOR, title_prefix="Noise",**kwargs):
     """
     Runs full intermittency + MI analysis on a noise model.
     Produces:
@@ -105,7 +105,7 @@ def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETRE
     # -------------------------
     # Generate noise
     # -------------------------
-    data = noise_generator(N=noise_len)
+    data = noise_generator(N=noise_len,**kwargs)
 
     # -------------------------
     # Moving-average detrender
