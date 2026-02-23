@@ -22,17 +22,6 @@ N = 5000
 
 from config import MIN_SAMPLES
 
-
-# -------------------------
-# λ₂ estimator
-# -------------------------
-def estimate_lambda2(inc):
-    inc = inc[~np.isnan(inc)]
-    if len(inc) < MIN_SAMPLES:
-        return np.nan
-    return kurtosis(inc, fisher=True)
-
-
 # -------------------------
 # Bootstrap λ₂(s)
 # -------------------------
@@ -45,7 +34,7 @@ def bootstrap_lambda2(inc, B=BOOTSTRAP_SAMPLES, ci=CI_LEVEL):
     stats = []
     for _ in range(B):
         sample = np.random.choice(inc, size=n, replace=True)
-        stats.append(estimate_lambda2(sample))
+        stats.append(lambda2.estimate_lambda2(sample))
 
     stats = np.array(stats)
     lower = np.percentile(stats, (1-ci)*50)
@@ -80,6 +69,17 @@ def bootstrap_mi(x, y, B=BOOTSTRAP_SAMPLES, ci=CI_LEVEL):
 def detrend_series(data, detrender, window):
     trend = np.array([detrender.detrend_point(data, i, window) for i in range(len(data))])
     return data - trend, trend
+
+
+# -------------------------
+# Calculate kurtosis variance
+# -------------------------
+
+def kurtosis_error_band(list_of_samples):
+    sigma = [np.sqrt(24/len(sample)) for sample in list_of_samples]
+    lower = [-2*s for s in sigma]
+    upper = [ 2*s for s in sigma]
+    return lower, upper
 
 
 # ============================================================
@@ -156,24 +156,24 @@ def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETRE
         # -------------------------
 
         # raw
-        lambda2_raw[s] = estimate_lambda2(inc)
+        lambda2_raw[s] = lambda2.estimate_lambda2(inc)
         mean_raw, low_raw, high_raw = bootstrap_lambda2(inc)
         lambda2_raw_ci[s] = (low_raw, high_raw)
 
         # detrended
-        lambda2_detr[s] = estimate_lambda2(detr_inc)
+        lambda2_detr[s] = lambda2.estimate_lambda2(detr_inc)
         mean_detr, low_detr, high_detr = bootstrap_lambda2(detr_inc)
         lambda2_detr_ci[s] = (low_detr, high_detr)
 
         # standardized raw
         inc_std = (inc - np.mean(inc)) / np.std(inc)
-        lambda2_raw_std[s] = estimate_lambda2(inc_std)
+        lambda2_raw_std[s] = lambda2.estimate_lambda2(inc_std)
         mean_raw_std, low_raw_std, high_raw_std = bootstrap_lambda2(inc_std)
         lambda2_raw_std_ci[s] = (low_raw_std, high_raw_std)
 
         # standardized detrended
         detr_inc_std = (detr_inc - np.mean(detr_inc)) / np.std(detr_inc)
-        lambda2_detr_std[s] = estimate_lambda2(detr_inc_std)
+        lambda2_detr_std[s] = lambda2.estimate_lambda2(detr_inc_std)
         mean_detr_std, low_detr_std, high_detr_std = bootstrap_lambda2(detr_inc_std)
         lambda2_detr_std_ci[s] = (low_detr_std, high_detr_std)
 
@@ -371,6 +371,24 @@ def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETRE
         fillcolor="rgba(128,0,128,0.15)",
         line=dict(color="rgba(0,0,0,0)"),
         name="detrended increments (std) CI"
+    ))
+    
+    kurt_err_lower,kurt_err_upper = kurtosis_error_band(increments_dict.values())
+
+    fig3.add_trace(go.Scatter(
+        x=SCALES,
+        y=kurt_err_lower,
+        mode="lines+markers",
+        name="kurtosis -2σ [σ=sqrt(24/Ns)]",
+        line=dict(color="black",dash="dash")
+    ))
+
+    fig3.add_trace(go.Scatter(
+        x=SCALES,
+        y=kurt_err_upper,
+        mode="lines+markers",
+        name="kurtosis +2σ [σ=sqrt(24/Ns]",
+        line=dict(color="black",dash="dash")
     ))
 
     fig3.update_layout(
