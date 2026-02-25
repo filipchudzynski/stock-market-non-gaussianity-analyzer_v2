@@ -25,7 +25,13 @@ from config import MIN_SAMPLES
 # -------------------------
 # Bootstrap λ₂(s)
 # -------------------------
-def bootstrap_lambda2(inc, B=BOOTSTRAP_SAMPLES, ci=CI_LEVEL):
+def bootstrap_lambda2(inc, estimator=lambda2.estimate_lambda2, B=BOOTSTRAP_SAMPLES, ci=CI_LEVEL):
+    """Bootstrap an intermittency estimator on increments.
+
+    Parameters:
+        inc: array-like increments
+        estimator: callable that accepts an increments array and returns a scalar λ₂ estimate
+    """
     inc = inc[~np.isnan(inc)]
     n = len(inc)
     if n < MIN_SAMPLES:
@@ -34,7 +40,7 @@ def bootstrap_lambda2(inc, B=BOOTSTRAP_SAMPLES, ci=CI_LEVEL):
     stats = []
     for _ in range(B):
         sample = np.random.choice(inc, size=n, replace=True)
-        stats.append(lambda2.estimate_lambda2(sample))
+        stats.append(estimator(sample))
 
     stats = np.array(stats)
     lower = np.percentile(stats, (1-ci)*50)
@@ -82,140 +88,28 @@ def kurtosis_error_band(list_of_samples):
     return lower, upper
 
 
-# ============================================================
-#   MAIN FUNCTION
-# ============================================================
-def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETREND_FACTOR, title_prefix="Noise",**kwargs):
-    """
-    Runs full intermittency + MI analysis on a noise model.
-    Produces:
-        - per-scale increment/detrending plots
-        - λ₂(s) (raw/detrended/std) with bootstrap CI
-        - MI with bootstrap CI
-    """
-
-    print("\n=== Running noise analysis ===\n")
-    print("Parameters")
-    print(f"N={noise_len}")
-    print(f"SCALES={SCALES}")
-    print(f"detrend_factor = {detrend_factor} i.e. increment_window*detrend_factor=detrend_window")
-    print(f"bin_factor = {bin_factor} i.e. #bins = bin_factor*sqrt(len)")
-    print(f"CI_LEVEL={CI_LEVEL}")
-    print(f"BOOTSTRAP_SAMPLES={BOOTSTRAP_SAMPLES}")
-    # -------------------------
-    # Generate noise
-    # -------------------------
-    data = noise_generator(N=noise_len,**kwargs)
-
-    # -------------------------
-    # Moving-average detrender
-    # -------------------------
-    detrender = moving_average.MovingAverageDetrender(10)
-
-    # -------------------------
-    # Precompute per-scale quantities
-    # -------------------------
-    increments_dict = {}
-    detrended_dict = {}
-    detrended_increments_dict = {}
-
-    lambda2_raw = {}
-    lambda2_detr = {}
-    lambda2_raw_ci = {}
-    lambda2_detr_ci = {}
-
-    lambda2_raw_std = {}
-    lambda2_detr_std = {}
-    lambda2_raw_std_ci = {}
-    lambda2_detr_std_ci = {}
-
-    detrend_windows = {}
-
-    # For global histogram ymax
-    global_hist_ymax = 0.0
-
-    for s in SCALES:
-        # increments at scale s
-        inc = increments.compute_increments(data, s)
-        increments_dict[s] = inc
-
-        # detrending window
-        detrend_window = int(detrend_factor * s)
-        detrend_windows[s] = detrend_window
-
-        # detrend original series
-        detrended, trend = detrend_series(data, detrender, detrend_window)
-        detrended_dict[s] = detrended
-
-        # increments of detrended series
-        detr_inc = increments.compute_increments(detrended, s)
-        detrended_increments_dict[s] = detr_inc
-
-        # -------------------------
-        # λ₂ estimates (raw, detrended, standardized)
-        # -------------------------
-
-        # raw
-        lambda2_raw[s] = lambda2.estimate_lambda2(inc)
-        mean_raw, low_raw, high_raw = bootstrap_lambda2(inc)
-        lambda2_raw_ci[s] = (low_raw, high_raw)
-
-        # detrended
-        lambda2_detr[s] = lambda2.estimate_lambda2(detr_inc)
-        mean_detr, low_detr, high_detr = bootstrap_lambda2(detr_inc)
-        lambda2_detr_ci[s] = (low_detr, high_detr)
-
-        # standardized raw
-        inc_std = (inc - np.mean(inc)) / np.std(inc)
-        lambda2_raw_std[s] = lambda2.estimate_lambda2(inc_std)
-        mean_raw_std, low_raw_std, high_raw_std = bootstrap_lambda2(inc_std)
-        lambda2_raw_std_ci[s] = (low_raw_std, high_raw_std)
-
-        # standardized detrended
-        detr_inc_std = (detr_inc - np.mean(detr_inc)) / np.std(detr_inc)
-        lambda2_detr_std[s] = lambda2.estimate_lambda2(detr_inc_std)
-        mean_detr_std, low_detr_std, high_detr_std = bootstrap_lambda2(detr_inc_std)
-        lambda2_detr_std_ci[s] = (low_detr_std, high_detr_std)
-
-        # -------------------------
-        # Precompute histogram ymax across scales (standardized)
-        # -------------------------
-        raw_std = inc_std
-        detr_std = detr_inc_std
-
-        N = len(raw_std)
-        bins = int(bin_factor * np.sqrt(N))
-
-        counts_raw, edges = np.histogram(raw_std, bins=bins, density=True)
-        counts_detr, _ = np.histogram(detr_std, bins=edges, density=True)
-
-        local_max = max(counts_raw.max(), counts_detr.max())
-        if local_max > global_hist_ymax:
-            global_hist_ymax = local_max
-
-    global_hist_ymax *= 1.1  # padding
-
-    # -------------------------
-    # Plot raw noise
-    # -------------------------
+# -------------------------
+# Plotting helpers (refactor: keep logic identical)
+# -------------------------
+def plot_raw_noise(data, title_prefix):
     fig0 = px.line(y=data, title=f"{title_prefix}: Generated Noise")
     fig0.show()
 
-    # -------------------------
-    # Per-scale plots
-    # -------------------------
-    for s in SCALES:
+
+def plot_per_scale(scales, increments_dict, detrended_dict, detrended_increments_dict,
+                   detrend_windows,
+                   lambda2_raw_std, lambda2_detr_std,
+                   lambda2_raw_std_ci, lambda2_detr_std_ci,
+                   bin_factor, global_hist_ymax, title_prefix):
+    for s in scales:
+
+        print(f"λ₂ raw_std={lambda2_raw_std[s]:.3f}"
+              f"[{lambda2_raw_std_ci[s][0]:.3f}, {lambda2_raw_std_ci[s][1]:.3f}]\n"
+              f"λ₂ detr_std={lambda2_detr_std[s]:.3f}"
+              f"[{lambda2_detr_std_ci[s][0]:.3f}, {lambda2_detr_std_ci[s][1]:.3f}]\n")
 
         subplot_title = (
             f"s={s} — Distributions<br>"
-            f"λ₂ raw={lambda2_raw[s]:.3f} "
-            f"[{lambda2_raw_ci[s][0]:.3f}, {lambda2_raw_ci[s][1]:.3f}]<br>"
-            f"λ₂ detr={lambda2_detr[s]:.3f} "
-            f"[{lambda2_detr_ci[s][0]:.3f}, {lambda2_detr_ci[s][1]:.3f}]<br>"
-            f"λ₂ raw_std={lambda2_raw_std[s]:.3f} "
-            f"[{lambda2_raw_std_ci[s][0]:.3f}, {lambda2_raw_std_ci[s][1]:.3f}]<br>"
-            f"λ₂ detr_std={lambda2_detr_std[s]:.3f} "
-            f"[{lambda2_detr_std_ci[s][0]:.3f}, {lambda2_detr_std_ci[s][1]:.3f}]"
         )
 
         fig = make_subplots(
@@ -296,59 +190,25 @@ def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETRE
         )
         fig.show()
 
-    # -------------------------
-    # λ₂(s) with CI (all four variants)
-    # -------------------------
+
+def plot_lambda2_with_ci(scales,
+                         lambda2_raw_std, lambda2_detr_std,
+                         lambda2_raw_std_ci, lambda2_detr_std_ci,
+                         increments_dict,estimator_confidence_interval, title_prefix):
     fig3 = go.Figure()
-
-    # raw
-    fig3.add_trace(go.Scatter(
-        x=SCALES,
-        y=[lambda2_raw[s] for s in SCALES],
-        mode="lines+markers",
-        name="raw increments",
-        line=dict(color="blue")
-    ))
-    fig3.add_trace(go.Scatter(
-        x=SCALES + SCALES[::-1],
-        y=[lambda2_raw_ci[s][0] for s in SCALES] +
-          [lambda2_raw_ci[s][1] for s in SCALES[::-1]],
-        fill="toself",
-        fillcolor="rgba(0,0,255,0.15)",
-        line=dict(color="rgba(0,0,0,0)"),
-        name="raw increments CI"
-    ))
-
-    # detrended
-    fig3.add_trace(go.Scatter(
-        x=SCALES,
-        y=[lambda2_detr[s] for s in SCALES],
-        mode="lines+markers",
-        name="detrended increments",
-        line=dict(color="red")
-    ))
-    fig3.add_trace(go.Scatter(
-        x=SCALES + SCALES[::-1],
-        y=[lambda2_detr_ci[s][0] for s in SCALES] +
-          [lambda2_detr_ci[s][1] for s in SCALES[::-1]],
-        fill="toself",
-        fillcolor="rgba(255,0,0,0.15)",
-        line=dict(color="rgba(0,0,0,0)"),
-        name="detrended increments CI"
-    ))
 
     # standardized raw
     fig3.add_trace(go.Scatter(
-        x=SCALES,
-        y=[lambda2_raw_std[s] for s in SCALES],
+        x=scales,
+        y=[lambda2_raw_std[s] for s in scales],
         mode="lines+markers",
         name="raw increments (std)",
         line=dict(color="green")
     ))
     fig3.add_trace(go.Scatter(
-        x=SCALES + SCALES[::-1],
-        y=[lambda2_raw_std_ci[s][0] for s in SCALES] +
-          [lambda2_raw_std_ci[s][1] for s in SCALES[::-1]],
+        x=scales + scales[::-1],
+        y=[lambda2_raw_std_ci[s][0] for s in scales] +
+          [lambda2_raw_std_ci[s][1] for s in scales[::-1]],
         fill="toself",
         fillcolor="rgba(0,255,0,0.15)",
         line=dict(color="rgba(0,0,0,0)"),
@@ -357,39 +217,40 @@ def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETRE
 
     # standardized detrended
     fig3.add_trace(go.Scatter(
-        x=SCALES,
-        y=[lambda2_detr_std[s] for s in SCALES],
+        x=scales,
+        y=[lambda2_detr_std[s] for s in scales],
         mode="lines+markers",
         name="detrended increments (std)",
         line=dict(color="purple")
     ))
     fig3.add_trace(go.Scatter(
-        x=SCALES + SCALES[::-1],
-        y=[lambda2_detr_std_ci[s][0] for s in SCALES] +
-          [lambda2_detr_std_ci[s][1] for s in SCALES[::-1]],
+        x=scales + scales[::-1],
+        y=[lambda2_detr_std_ci[s][0] for s in scales] +
+          [lambda2_detr_std_ci[s][1] for s in scales[::-1]],
         fill="toself",
         fillcolor="rgba(128,0,128,0.15)",
         line=dict(color="rgba(0,0,0,0)"),
         name="detrended increments (std) CI"
     ))
     
-    kurt_err_lower,kurt_err_upper = kurtosis_error_band(increments_dict.values())
+    if estimator_confidence_interval:
+      est_err_lower,est_err_upper = estimator_confidence_interval(increments_dict.values())
 
-    fig3.add_trace(go.Scatter(
-        x=SCALES,
-        y=kurt_err_lower,
-        mode="lines+markers",
-        name="kurtosis -2σ [σ=sqrt(24/Ns)]",
-        line=dict(color="black",dash="dash")
-    ))
+      fig3.add_trace(go.Scatter(
+          x=scales,
+          y=est_err_lower,
+          mode="lines+markers",
+          name="est ci -2σ [σ=sqrt(24/Ns)]",
+          line=dict(color="black",dash="dash")
+      ))
 
-    fig3.add_trace(go.Scatter(
-        x=SCALES,
-        y=kurt_err_upper,
-        mode="lines+markers",
-        name="kurtosis +2σ [σ=sqrt(24/Ns]",
-        line=dict(color="black",dash="dash")
-    ))
+      fig3.add_trace(go.Scatter(
+          x=scales,
+          y=est_err_upper,
+          mode="lines+markers",
+          name="est ci +2σ [σ=sqrt(24/Ns]",
+          line=dict(color="black",dash="dash")
+      ))
 
     fig3.update_layout(
         title=f"{title_prefix}: λ₂ across scales with bootstrap confidence intervals",
@@ -398,14 +259,13 @@ def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETRE
     )
     fig3.show()
 
-    # -------------------------
-    # Mutual information with CI
-    # -------------------------
+
+def plot_mutual_info(noise_generator, title_prefix, bootstrap_mi_func):
     x = noise_generator()
     y = noise_generator()
 
     mi_reg = mutual_info_regression(x.reshape(-1, 1), y)[0]
-    mi_mean, mi_low, mi_high = bootstrap_mi(x, y)
+    mi_mean, mi_low, mi_high = bootstrap_mi_func(x, y)
 
     fig4 = go.Figure()
     fig4.add_trace(go.Scatter(y=x, mode="lines", name="sample 1"))
@@ -418,5 +278,139 @@ def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETRE
         )
     )
     fig4.show()
+
+
+# ============================================================
+#   MAIN FUNCTION
+# ============================================================
+def analyze_noise(noise_generator,noise_len=N, bin_factor=1,detrend_factor=DETREND_FACTOR, title_prefix="Noise", intermittency_estimator=None, estimator_confidence_interval=None, **kwargs):
+    """
+    Runs full intermittency + MI analysis on a noise model.
+    Produces:
+        - per-scale increment/detrending plots
+        - λ₂(s) (raw/detrended/std) with bootstrap CI
+        - MI with bootstrap CI
+    """
+
+    print("\n=== Running noise analysis ===\n")
+    print("Parameters")
+    print(f"N={noise_len}")
+    print(f"SCALES={SCALES}")
+    print(f"detrend_factor = {detrend_factor} i.e. increment_window*detrend_factor=detrend_window")
+    print(f"bin_factor = {bin_factor} i.e. #bins = bin_factor*sqrt(len)")
+    print(f"CI_LEVEL={CI_LEVEL}")
+    print(f"BOOTSTRAP_SAMPLES={BOOTSTRAP_SAMPLES}")
+    # choose intermittency estimator (callable)
+    estimator = intermittency_estimator if intermittency_estimator is not None else lambda2.estimate_lambda2
+    # -------------------------
+    # Generate noise
+    # -------------------------
+    data = noise_generator(N=noise_len,**kwargs)
+
+    # -------------------------
+    # Moving-average detrender
+    # -------------------------
+    detrender = moving_average.MovingAverageDetrender(10)
+
+    # -------------------------
+    # Precompute per-scale quantities
+    # -------------------------
+    increments_dict = {}
+    detrended_dict = {}
+    detrended_increments_dict = {}
+
+    lambda2_raw_std = {}
+    lambda2_detr_std = {}
+    lambda2_raw_std_ci = {}
+    lambda2_detr_std_ci = {}
+
+    detrend_windows = {}
+
+    # For global histogram ymax
+    global_hist_ymax = 0.0
+
+    for s in SCALES:
+        # increments at scale s
+        inc = increments.compute_increments(data, s)
+        increments_dict[s] = inc
+
+        # detrending window
+        detrend_window = int(detrend_factor * s)
+        detrend_windows[s] = detrend_window
+
+        # detrend original series
+        detrended, trend = detrend_series(data, detrender, detrend_window)
+        detrended_dict[s] = detrended
+
+        # increments of detrended series
+        detr_inc = increments.compute_increments(detrended, s)
+        detrended_increments_dict[s] = detr_inc
+
+        # -------------------------
+        # λ₂ estimates (raw, detrended, standardized)
+        # -------------------------
+
+        # standardized raw
+        inc_std = (inc - np.mean(inc)) / np.std(inc)
+        lambda2_raw_std[s] = estimator(inc_std)
+        mean_raw_std, low_raw_std, high_raw_std = bootstrap_lambda2(inc_std, estimator=estimator)
+        lambda2_raw_std_ci[s] = (low_raw_std, high_raw_std)
+
+        # standardized detrended
+        detr_inc_std = (detr_inc - np.mean(detr_inc)) / np.std(detr_inc)
+        lambda2_detr_std[s] = estimator(detr_inc_std)
+        mean_detr_std, low_detr_std, high_detr_std = bootstrap_lambda2(detr_inc_std, estimator=estimator)
+        lambda2_detr_std_ci[s] = (low_detr_std, high_detr_std)
+
+        # -------------------------
+        # Precompute histogram ymax across scales (standardized)
+        # -------------------------
+        raw_std = inc_std
+        detr_std = detr_inc_std
+
+        N = len(raw_std)
+        bins = int(bin_factor * np.sqrt(N))
+
+        counts_raw, edges = np.histogram(raw_std, bins=bins, density=True)
+        counts_detr, _ = np.histogram(detr_std, bins=edges, density=True)
+
+        local_max = max(counts_raw.max(), counts_detr.max())
+        if local_max > global_hist_ymax:
+            global_hist_ymax = local_max
+
+    global_hist_ymax *= 1.1  # padding
+
+    # -------------------------
+    # Plots (delegated to helper functions)
+    # -------------------------
+    plot_raw_noise(data, title_prefix)
+
+    plot_per_scale(
+        SCALES,
+        increments_dict,
+        detrended_dict,
+        detrended_increments_dict,
+        detrend_windows,
+        lambda2_raw_std,
+        lambda2_detr_std,
+        lambda2_raw_std_ci,
+        lambda2_detr_std_ci,
+        bin_factor,
+        global_hist_ymax,
+        title_prefix,
+    )
+
+    plot_lambda2_with_ci(
+        SCALES,
+        lambda2_raw_std,
+        lambda2_detr_std,
+        lambda2_raw_std_ci,
+        lambda2_detr_std_ci,
+        increments_dict,
+        estimator_confidence_interval,
+        title_prefix,
+    )
+
+    plot_mutual_info(noise_generator, title_prefix, bootstrap_mi)
 
     print("\n=== Analysis complete ===\n")
