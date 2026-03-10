@@ -1,0 +1,69 @@
+
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\title{Stabilizing Log-Energy Based Estimation of the Intermittency Parameter $\lambda^2$}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Essential Verification Checklist}
+
+Please verify the following before interpreting $\lambda$ estimates:
+
+\begin{enumerate}
+\item Energy must be computed as sliding window sum of squared returns.
+\item Log must be applied to the energy, not to squared returns.
+\item Log-energy must be centered before covariance estimation.
+\item Covariance must be computed as function of lag $\Delta t$.
+\item $\lambda^2$ must be estimated from slope of $C(\Delta t)$ vs $\log(\Delta t)$.
+\end{enumerate}
+
+If implemented correctly, white noise should produce:
+\[
+\lambda^2 \approx 0
+\]
+
+\section{Problem 1: Incorrect Energy Definition}
+Incorrect:
+\[
+\log(r_t^2)
+\]
+Correct:
+\[
+E_s(t) = \sum_{k=0}^{s-1} r_{t-k}^2
+\]
+
+\section{Problem 2: Missing Scale Structure}
+Energy must be evaluated at multiple scales:
+\[
+s = 2,4,8,16,32,64
+\]
+
+\section{Problem 3: Non-Sliding Windows}
+Energy must move continuously through the signal:
+\[
+E_s(t) = \sum_{k=0}^{s-1} r_{t-k}^2
+\]
+
+\section{Problem 4: Missing Centering}
+Centered log-energy:
+\[
+\\tilde{L}_s(t) = \log E_s(t) - \\langle \log E_s \\rangle
+\]
+
+\section{Problem 5: Incorrect Slope Estimation}
+Log-energy covariance:
+\[
+C(\\Delta t) = \\langle \\tilde{L}(t)\\tilde{L}(t+\\Delta t) \\rangle
+\]
+
+Intermittency estimate:
+\[
+C(\\Delta t) \\sim -\\lambda^2 \\log(\\Delta t)
+\]
+
+\end{document}
