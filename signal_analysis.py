@@ -2,11 +2,58 @@ import numpy as np
 import pywt
 import pandas as pd
 from sklearn.feature_selection import mutual_info_regression
+from scipy.signal import fftconvolve
 
 try:
     import multiprocess as mp
 except ImportError:  # pragma: no cover
     mp = None
+
+
+# =========================================================
+# 1. Wavelet definitions (analytical, continuous)
+# =========================================================
+
+def smooth_step(u, u0, eps):
+    return 0.5 * (1 + np.tanh((u - u0) / eps))
+
+def psi_haar_smooth(u, eps=0.02):
+    return (smooth_step(u, -0.5, eps)
+            - 2 * smooth_step(u, 0.0, eps)
+            + smooth_step(u, 0.5, eps))
+
+def psi_mexh(u):
+    return (1 - u**2) * np.exp(-0.5 * u**2)
+
+def psi_gauss1(u):
+    return -u * np.exp(-0.5 * u**2)
+
+def psi_gauss2(u):
+    return (u**2 - 1) * np.exp(-0.5 * u**2)
+
+# =========================================================
+# 2. Scale wavelet to arbitrary scale a
+# =========================================================
+
+def scale_wavelet(psi, a, dt):
+    L = int(10 * a / dt)
+    if L < 2:
+        L = 2
+    u = np.linspace(-L/2, L/2, L) / a
+    psi_scaled = psi(u) / a
+    return u * a, psi_scaled
+
+# =========================================================
+# 3. General FFT-based CWT
+# =========================================================
+
+def cwt_fft(f, dt, scales, psi):
+    W = []
+    for a in scales:
+        _, psi_a = scale_wavelet(psi, a, dt)
+        conv = fftconvolve(f, psi_a[::-1], mode='same') * dt
+        W.append(conv)
+    return np.array(W)
 
 
 def compute_wavelet_details(signal, wavelet="haar", max_level=10):
@@ -23,6 +70,10 @@ def compute_wavelet_details(signal, wavelet="haar", max_level=10):
 
     return np.array(detail_series), np.array(scales)
 
+def compute_wavelet_details_custom(signal,scales,wavelet=psi_haar_smooth):
+    dt = 1.0
+    detail_series = cwt_fft(signal, dt, scales, wavelet)
+    return np.array(detail_series), scales
 
 def compute_local_volatility(detail_series, window=50):
     """Compute a local volatility series from wavelet detail coefficients."""
@@ -104,6 +155,7 @@ def compute_mutual_information_map(
 
 def analyze_signal(
     signal,
+    scales,
     wavelet="haar",
     max_level=10,
     window=50,
@@ -113,7 +165,7 @@ def analyze_signal(
     n_jobs=None,
 ):
     """Analyze one signal and return log-volatility and mutual-information results."""
-    detail_series, scales = compute_wavelet_details(signal, wavelet=wavelet, max_level=max_level)
+    detail_series, scales = compute_wavelet_details_custom(signal, scales, wavelet=wavelet)
     log_vol_series = compute_log_volatility(detail_series, window=window)
     mi_map = compute_mutual_information_map(
         log_vol_series,
