@@ -39,6 +39,7 @@ def _(plt, results_snp):
     plt.title("S&P500")
     plt.xlabel('Time lag')
     plt.ylabel('Scale')
+    plt.yscale('log')
     plt.colorbar(label='MI')
     plt.show()
     return
@@ -175,15 +176,7 @@ def _():
 
 @app.cell
 def _(np, plt):
-    def plot_comparison_with_ridges(input_map, scales, sigmas, lags, smooth_fn):
-        """
-        input_map : 2D MI map (scales × lags)
-        scales    : array of scale values (top→bottom)
-        sigmas    : list of (sigma_scale, sigma_lag)
-        lags      : array of lag values
-        smooth_fn : smoothing function, e.g. smooth_mi_map
-        """
-
+    def plot_raw_mi_map(input_map, scales, lags,title="MI map"):
         # --- 1. Plot raw input ---
         plt.figure(figsize=(12, 5))
         plt.imshow(
@@ -193,12 +186,24 @@ def _(np, plt):
             extent=[lags[0], lags[-1], scales[-1], scales[0]],
 
         )
-        plt.title("S&P500 — Raw MI map")
+        plt.title(title)
         plt.xlabel("Time lag")
         plt.ylabel("Scale")
+        plt.yscale('log')
         plt.colorbar(label="MI")
         plt.tight_layout()
         plt.show()
+    
+    def plot_comparison_with_ridges(input_map, scales, sigmas, lags, smooth_fn):
+        """
+        input_map : 2D MI map (scales × lags)
+        scales    : array of scale values (top→bottom)
+        sigmas    : list of (sigma_scale, sigma_lag)
+        lags      : array of lag values
+        smooth_fn : smoothing function, e.g. smooth_mi_map
+        """
+        plot_raw_mi_map(input_map, scales,lags,"S&P500 — Raw MI map")
+
 
         # --- 2. Plot smoothed versions ---
         for (s_scale, s_lag) in sigmas:
@@ -227,13 +232,13 @@ def _(np, plt):
             plt.xlabel("Time lag")
             plt.ylabel("Scale")
             plt.colorbar(label="MI")
-
+            plt.yscale('log')
             plt.legend()
             plt.tight_layout()
             plt.show()
 
 
-    return (plot_comparison_with_ridges,)
+    return plot_comparison_with_ridges, plot_raw_mi_map
 
 
 @app.cell
@@ -295,6 +300,14 @@ def _(input_map, np, plt, smooth_mi_map):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # smoothing vs ridge
+    """)
+    return
+
+
 @app.cell
 def _(np, plt):
     def plot_sigma_grid_with_ridges(input_map, scales, lags, sigma_pairs, smooth_fn):
@@ -339,6 +352,8 @@ def _(np, plt):
             ax.set_title(title, fontsize=10)
             ax.set_xlabel("Lag")
             ax.set_ylabel("Scale")
+            ax.set_yscale('log')
+
 
         plt.tight_layout()
         plt.show()
@@ -383,6 +398,14 @@ def _(
         sigma_pairs=sigma_pairs,
         smooth_fn=smooth_mi_map
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # smoothing vs ridge width
+    """)
     return
 
 
@@ -478,7 +501,7 @@ def _(np, plt):
             ax.set_title(title, fontsize=10)
             ax.set_xlabel("Lag")
             ax.set_ylabel("Scale")
-
+            ax.set_yscale('log')
         plt.tight_layout()
         plt.show()
 
@@ -519,6 +542,274 @@ def _(
         sigma_pairs=sigma_pairs,
         smooth_fn=smooth_mi_map
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # building spline field
+    """)
+    return
+
+
+@app.cell
+def _(np, plt):
+    from scipy.interpolate import RectBivariateSpline
+
+    def build_field(smoothed, scales, lags):
+        return RectBivariateSpline(scales, lags, smoothed,kx=3,ky=3)
+
+
+    def plot_spline_field(M, scales, lags, upsample_scale=4, upsample_lag=4,ridge=None):
+        # Build dense grid
+        s_dense = np.linspace(scales.min(), scales.max(), len(scales)*upsample_scale)
+        t_dense = np.linspace(lags.min(), lags.max(), len(lags)*upsample_lag)
+
+        S, T = np.meshgrid(s_dense, t_dense, indexing="ij")
+
+        # Evaluate spline on dense grid
+        Z = M(s_dense, t_dense)
+
+        plt.figure(figsize=(10, 6))
+        plt.imshow(
+            Z,
+            aspect="auto",
+            extent=[t_dense[0], t_dense[-1], s_dense[-1], s_dense[0]],
+            cmap="viridis"
+        )
+        if ridge is not None:
+            plt.plot(ridge, scales, color="red", linewidth=2, label="Ridge")
+
+        plt.colorbar(label="M(s, τ)")
+        plt.xlabel("Lag τ")
+        plt.ylabel("Scale s")
+        plt.yscale('log')
+        plt.title("Spline-interpolated field M(s, τ)")
+        plt.tight_layout()
+        plt.show()
+
+
+    return RectBivariateSpline, build_field, plot_spline_field
+
+
+@app.cell
+def _(build_field, np, results_snp, smooth_mi_map):
+    sm = smooth_mi_map(np.array(results_snp[0]["S&P500"]["mi_map_normalized"]), 0.5,2)
+
+    M = build_field(sm,
+                    scales=results_snp[0]["S&P500"]["scales"],
+                    lags=np.linspace(-800, 800, 400+400+1))
+    return M, sm
+
+
+@app.cell
+def _(M, np, plot_raw_mi_map, plot_spline_field, results_snp):
+    plot_raw_mi_map(np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),
+                    scales=results_snp[0]["S&P500"]["scales"],
+                    lags=np.linspace(-800, 800, 400+400+1),title="Raw input MI map BTC")
+    plot_spline_field(M,
+                    scales=results_snp[0]["S&P500"]["scales"],
+                    lags=np.linspace(-800, 800, 400+400+1))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    reading specific points
+    """)
+    return
+
+
+@app.cell
+def _(M):
+    print(M(0,0))
+    print(M(25,range(0,100)))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## smoothing impact on spline
+    """)
+    return
+
+
+@app.cell
+def _(RectBivariateSpline, np, plt):
+
+
+    def plot_sigma_grid_spline_error(input_map, scales, lags, sigma_pairs, smooth_fn):
+        """
+        4×4 grid: spline interpolation error for different smoothings.
+
+        input_map   : 2D MI map (scales × lags)
+        scales      : 1D array of scales (len = n_scales)
+        lags        : 1D array of lags   (len = n_lags)
+        sigma_pairs : list of 16 (σ_scale, σ_lag)
+        smooth_fn   : function(input_map, σ_scale, σ_lag) -> smoothed_map
+        """
+        assert len(sigma_pairs) == 16
+
+        fig, axes = plt.subplots(4, 4, figsize=(18, 18),constrained_layout=True)
+
+        for ax, (s_scale, s_lag) in zip(axes.flat, sigma_pairs):
+
+            # 1) Smooth
+            if s_scale == 0 and s_lag == 0:
+                sm = input_map
+                title = "raw (σ=0,0)"
+            else:
+                sm = smooth_fn(input_map, s_scale, s_lag)
+                title = f"σ_scale={s_scale}, σ_lag={s_lag}"
+
+            # 2) Fit spline on smoothed field
+            M = RectBivariateSpline(scales, lags, sm,kx=2,ky=2)
+
+            # 3) Evaluate spline back on original grid
+            sm_spline = M(scales, lags)  # shape (n_scales, n_lags)
+
+            # 4) Error field
+            err = np.abs(sm_spline - sm)
+
+            im = ax.imshow(
+                err,
+                aspect="auto",
+                extent=[lags[0], lags[-1], scales[-1], scales[0]],
+                cmap="magma",
+                interpolation=None
+            )
+            ax.set_title(title, fontsize=10)
+            ax.set_xlabel("Lag")
+            ax.set_ylabel("Scale")
+            ax.set_yscale('log')
+
+        fig.colorbar(im, ax=axes.ravel().tolist(), label="|M_spline - M_smoothed|")
+        plt.show()
+
+
+    return (plot_sigma_grid_spline_error,)
+
+
+@app.cell
+def _(
+    np,
+    plot_sigma_grid_spline_error,
+    results_snp,
+    sigma_pairs,
+    smooth_mi_map,
+):
+    plot_sigma_grid_spline_error(
+        input_map=np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),
+        scales=results_snp[0]["S&P500"]["scales"],
+        lags=np.linspace(-800, 800, 801),
+        sigma_pairs=sigma_pairs,
+        smooth_fn=smooth_mi_map
+    )
+
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # identifying ridge from continous surface
+    """)
+    return
+
+
+@app.cell
+def _(np):
+    from scipy.optimize import brentq
+
+    def find_ridge_lag(M, s, lag_min, lag_max, n_samples=200):
+        # sample derivative to find sign changes
+        lags = np.linspace(lag_min, lag_max, n_samples)
+        dM = np.array([M(s, τ, dx=0, dy=1)[0][0] for τ in lags])
+
+        # find zero crossings
+        idx = np.where(np.diff(np.sign(dM)))[0]
+        if len(idx) == 0:
+            return None
+
+        candidates = []
+        for i in idx:
+            a, b = lags[i], lags[i+1]
+            try:
+                τ0 = brentq(lambda τ: M(s, τ, dx=0, dy=1)[0][0], a, b)
+                curv = M(s, τ0, dx=0, dy=2)[0][0]
+                if curv < 0:  # must be a maximum
+                    candidates.append((τ0, curv))
+            except ValueError:
+                pass
+
+        if not candidates:
+            return None
+
+        # choose the strongest maximum (most negative curvature)
+        τ_best, _ = min(candidates, key=lambda x: x[1])
+        return τ_best
+
+    def extract_ridge(M, scales, lag_min, lag_max):
+        ridge = []
+        for s in scales:
+            τ = find_ridge_lag(M, s, lag_min, lag_max)
+            ridge.append(τ)
+        return np.array(ridge)
+
+
+    return (extract_ridge,)
+
+
+@app.cell
+def _(plt):
+    def plot_ridge(input_map, scales, lags, ridge_lags, title="Ridge"):
+        plt.figure(figsize=(10, 6))
+        plt.imshow(
+            input_map,
+            aspect="auto",
+            extent=[lags[0], lags[-1], scales[-1], scales[0]],
+            cmap="viridis",
+            interpolation=None
+        )
+        plt.plot(ridge_lags, scales, color="red", linewidth=2, label="Ridge")
+        plt.xlabel("Lag τ")
+        plt.ylabel("Scale s")
+        plt.yscale("log")
+        plt.title(title)
+        plt.colorbar(label="MI")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+
+    return (plot_ridge,)
+
+
+@app.cell
+def _(M, extract_ridge, results_snp):
+    # 3. Extract ridge
+    ridge_lags = extract_ridge(M, results_snp[0]["S&P500"]["scales"], -800, 800)
+    return (ridge_lags,)
+
+
+@app.cell
+def _(M, np, plot_ridge, plot_spline_field, results_snp, ridge_lags, sm):
+    plot_ridge(sm,
+               scales=results_snp[0]["S&P500"]["scales"],
+               lags=np.linspace(-800, 800, 400+400+1),
+               ridge_lags=ridge_lags,
+               title="Derivative-based ridge")
+    plot_spline_field(M,
+                    scales=results_snp[0]["S&P500"]["scales"],
+                    lags=np.linspace(-800, 800, 400+400+1),ridge=ridge_lags)
+    return
+
+
+@app.cell
+def _():
     return
 
 
