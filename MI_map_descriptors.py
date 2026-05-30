@@ -44,11 +44,19 @@ def _(plt, results_snp):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # gaussian smoothing
+    \( G(s,\tau) = \exp\left(-\frac{s^2}{2\sigma_{\text{scale}}^2} - \frac{\tau^2}{2\sigma_{\text{lag}}^2}\right) \)
+    """)
+    return
+
+
 @app.cell
 def _(gaussian_filter):
     def smooth_mi_map(mi_map, sigma_scale=1.0, sigma_lag=2.0, alpha=0.0):
-        """
-        alpha = regularisation strength (0 = none)
+        """    alpha = regularisation strength (0 = none)
         """
         smoothed = gaussian_filter(mi_map, sigma=[sigma_scale, sigma_lag])
 
@@ -60,6 +68,87 @@ def _(gaussian_filter):
         return smoothed
 
     return (smooth_mi_map,)
+
+
+@app.cell
+def _(gaussian_filter, np, plt):
+    def example_smoothing(sigmas = [
+            (0, 0),
+            (1.0, 0),
+            (0, 1.0),
+            (1, 1.0),
+        ]):
+        # Create synthetic 2D field
+        scales = np.linspace(1, 20, 100)
+        lags = np.linspace(-200, 200, 300)
+    
+        S, L = np.meshgrid(scales, lags, indexing="ij")
+    
+        # True ridge: a simple curve
+        true_ridge = 0.5 * (S - 10)
+    
+        # Base field: Gaussian bump around the ridge
+        field = np.exp(-0.5 * ((L - true_ridge) / 10)**2)
+    
+        # Add noise
+        np.random.seed(0)
+        noisy_field = field + 0.3 * np.random.randn(*field.shape)
+
+
+        plt.imshow(noisy_field,aspect='auto',extent=[lags[0], lags[-1], scales[-1], scales[0]])
+        plt.show()
+    
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    
+        for ax, (s_scale, s_lag) in zip(axes.flat, sigmas):
+            sm = gaussian_filter(noisy_field, sigma=[s_scale, s_lag])
+            sm = ax.imshow(sm, aspect="auto", extent=[lags[0], lags[-1], scales[-1], scales[0]], cmap="viridis")
+            ax.set_title(f"σ_scale (y axis)={s_scale}, σ_lag (x axis)={s_lag}")
+            ax.set_xlabel("Lag")
+            ax.set_ylabel("Scale")
+            fig.colorbar(sm,label="Z")
+
+        plt.tight_layout()
+        plt.show()
+    example_smoothing()
+    return (example_smoothing,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## selective smoothing
+    notice how signal amplitude is affected as well
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    smoothing only x
+    """)
+    return
+
+
+@app.cell
+def _(example_smoothing):
+    example_smoothing(sigmas = [(0,0.2),(0,0.4),(0,0.6),(0,0.8)])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    smoothing only y
+    """)
+    return
+
+
+@app.cell
+def _(example_smoothing):
+    example_smoothing(sigmas = [(0.2,0),(0.4,0),(0.6,0),(0.8,0)])
+    return
 
 
 @app.cell
@@ -134,11 +223,11 @@ def _(np, plt):
 
             else:
                 plt.title(f"S&P500 — Smoothed (σ_scale={s_scale}, σ_lag={s_lag})")
-        
+
             plt.xlabel("Time lag")
             plt.ylabel("Scale")
             plt.colorbar(label="MI")
-        
+
             plt.legend()
             plt.tight_layout()
             plt.show()
@@ -168,14 +257,6 @@ def _(np, plot_comparison_with_ridges, results_snp, smooth_mi_map):
         smooth_fn=smooth_mi_map
     )
     return (input_map,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # why ridge is breaking?
-    """)
-    return
 
 
 @app.cell
@@ -211,20 +292,234 @@ def _(input_map, np, plt, smooth_mi_map):
         print(f"ind {i}, max val {np.max(smooth_mi_map(input_map,0.8,1.5)[i])} max ind {np.argmax(smooth_mi_map(input_map,0.8,1.5)[i])}")
         plt.plot(smooth_mi_map(input_map,0.8,1.5)[i])
         plt.show()
-
     return
 
 
 @app.cell
-def _():
+def _(np, plt):
+    def plot_sigma_grid_with_ridges(input_map, scales, lags, sigma_pairs, smooth_fn):
+        """
+        input_map   : 2D MI map (scales × lags)
+        scales      : array of scale values (top→bottom)
+        lags        : array of lag values
+        sigma_pairs : list of 16 (σ_scale, σ_lag) tuples
+        smooth_fn   : smoothing function, e.g. smooth_mi_map
+        """
+
+        assert len(sigma_pairs) == 16, "Provide exactly 16 sigma pairs."
+
+        fig, axes = plt.subplots(4, 4, figsize=(18, 18))
+
+        for ax, (s_scale, s_lag) in zip(axes.flat, sigma_pairs):
+
+            # Apply smoothing
+            if s_scale == 0 and s_lag == 0:
+                sm = input_map
+                title = "σ_scale=0, σ_lag=0 (raw)"
+            else:
+                sm = smooth_fn(input_map, s_scale, s_lag)
+                title = f"σ_scale={s_scale}, σ_lag={s_lag}"
+
+            # Ridge extraction
+            ridge_idx = np.argmax(sm, axis=1)
+            ridge_lags = lags[ridge_idx]
+
+            # Plot MI map
+            ax.imshow(
+                sm,
+                interpolation=None,
+                aspect="auto",
+                extent=[lags[0], lags[-1], scales[-1], scales[0]],
+                cmap="viridis"
+            )
+
+            # Plot ridge
+            ax.plot(ridge_lags, scales, color="red", linewidth=1.5)
+
+            ax.set_title(title, fontsize=10)
+            ax.set_xlabel("Lag")
+            ax.set_ylabel("Scale")
+
+        plt.tight_layout()
+        plt.show()
+
+
+    return (plot_sigma_grid_with_ridges,)
+
+
+@app.cell
+def _(np, plot_sigma_grid_with_ridges, results_snp, smooth_mi_map):
+    sigma_pairs = [
+        (0,0), (0.2,0.5), (0.2,1.0), (0.2,2.0),
+        (0.5,0.2), (0.5,0.5), (0.5,1.0), (0.5,2.0),
+        (1.0,0.2), (1.0,0.5), (1.0,1.0), (1.0,2.0),
+        (2.0,0.2), (2.0,0.5), (2.0,1.0), (2.0,2.0),
+    ]
+    plot_sigma_grid_with_ridges(
+        input_map=results_snp[0]["S&P500"]["mi_map"],
+        scales=results_snp[0]["S&P500"]["scales"],
+        lags=np.linspace(-800, 800, 400+400+1),
+        sigma_pairs=sigma_pairs,
+        smooth_fn=smooth_mi_map
+    )
+
+
+
+    return (sigma_pairs,)
+
+
+@app.cell
+def _(
+    np,
+    plot_sigma_grid_with_ridges,
+    results_snp,
+    sigma_pairs,
+    smooth_mi_map,
+):
+    plot_sigma_grid_with_ridges(
+        input_map=results_snp[0]["S&P500"]["mi_map_normalized"],
+        scales=results_snp[0]["S&P500"]["scales"],
+        lags=np.linspace(-800, 800, 400+400+1),
+        sigma_pairs=sigma_pairs,
+        smooth_fn=smooth_mi_map
+    )
     return
 
 
 @app.cell
-def _():
-    import marimo as mo
+def _(np, plt):
 
-    return (mo,)
+    def ridge_widths_curvature(smoothed_mi, lags):
+        """
+        Curvature-based width estimate per scale.
+        Assumes local Gaussian shape around ridge in lag.
+        """
+        n_scales, n_lags = smoothed_mi.shape
+        widths = np.full(n_scales, np.nan)
+
+        # finite difference step in lag (assumes uniform grid)
+        dτ = lags[1] - lags[0]
+
+        # ridge index per scale
+        ridge_idx = np.argmax(smoothed_mi, axis=1)
+
+        for i in range(n_scales):
+            j = ridge_idx[i]
+
+            # need neighbors on both sides
+            if j <= 0 or j >= n_lags - 1:
+                continue
+
+            row = smoothed_mi[i, :]
+
+            # avoid log(0)
+            eps = 1e-12
+            f_minus = np.log(row[j - 1] + eps)
+            f_0     = np.log(row[j]     + eps)
+            f_plus  = np.log(row[j + 1] + eps)
+
+            # second derivative of log M wrt lag (central difference)
+            d2_logM = (f_plus - 2 * f_0 + f_minus) / (dτ**2)
+
+            if d2_logM >= 0:  # not a proper maximum / bad curvature
+                continue
+
+            sigma = 1.0 / np.sqrt(-d2_logM)
+            widths[i] = sigma
+
+        return widths
+
+
+
+    def plot_sigma_grid_with_ridges_and_widths(input_map, scales, lags, sigma_pairs, smooth_fn):
+        """
+        4×4 grid: MI map + ridge + ridge width overlay.
+        """
+        assert len(sigma_pairs) == 16, "Provide exactly 16 sigma pairs."
+
+        fig, axes = plt.subplots(4, 4, figsize=(18, 18))
+
+        for ax, (s_scale, s_lag) in zip(axes.flat, sigma_pairs):
+
+            # Smoothing
+            if s_scale == 0 and s_lag == 0:
+                sm = input_map
+                title = "raw (σ=0,0)"
+            else:
+                sm = smooth_fn(input_map, s_scale, s_lag)
+                title = f"σ_scale={s_scale}, σ_lag={s_lag}"
+
+            # Ridge
+            ridge_idx = np.argmax(sm, axis=1)
+            ridge_lags = lags[ridge_idx]
+
+            # Widths
+            widths = ridge_widths_curvature(sm, lags)
+
+            # Plot MI map
+            ax.imshow(
+                sm,
+                interpolation=None,
+                aspect="auto",
+                extent=[lags[0], lags[-1], scales[-1], scales[0]],
+                cmap="viridis"
+            )
+
+            # Plot ridge
+            ax.plot(ridge_lags, scales, color="red", linewidth=1.5)
+
+            # Plot width bars
+            for i, (lag_center, w) in enumerate(zip(ridge_lags, widths)):
+                if np.isnan(w):
+                    continue
+                s = scales[i]
+                ax.hlines(s, lag_center - w, lag_center + w, colors="white", linewidth=1)
+
+            ax.set_title(title, fontsize=10)
+            ax.set_xlabel("Lag")
+            ax.set_ylabel("Scale")
+
+        plt.tight_layout()
+        plt.show()
+
+
+    return (plot_sigma_grid_with_ridges_and_widths,)
+
+
+@app.cell
+def _(
+    np,
+    plot_sigma_grid_with_ridges_and_widths,
+    results_snp,
+    sigma_pairs,
+    smooth_mi_map,
+):
+    plot_sigma_grid_with_ridges_and_widths(
+        input_map=np.array(results_snp[0]["S&P500"]["mi_map"]),
+        scales=results_snp[0]["S&P500"]["scales"],
+        lags=np.linspace(-800, 800, 400+400+1),
+        sigma_pairs=sigma_pairs,
+        smooth_fn=smooth_mi_map
+    )
+    return
+
+
+@app.cell
+def _(
+    np,
+    plot_sigma_grid_with_ridges_and_widths,
+    results_snp,
+    sigma_pairs,
+    smooth_mi_map,
+):
+    plot_sigma_grid_with_ridges_and_widths(
+        input_map=np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),
+        scales=results_snp[0]["S&P500"]["scales"],
+        lags=np.linspace(-800, 800, 400+400+1),
+        sigma_pairs=sigma_pairs,
+        smooth_fn=smooth_mi_map
+    )
+    return
 
 
 if __name__ == "__main__":
