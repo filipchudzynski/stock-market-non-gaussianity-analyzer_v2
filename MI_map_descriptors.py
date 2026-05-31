@@ -24,7 +24,7 @@ def _():
 def _(np):
     results_snp=np.load("mi_map_snp_all.npy",allow_pickle=True)
     results_btc=np.load("mi_map_btc_all.npy",allow_pickle=True)
-    return (results_snp,)
+    return results_btc, results_snp
 
 
 @app.cell
@@ -261,7 +261,7 @@ def _(np, plot_comparison_with_ridges, results_snp, smooth_mi_map):
         lags=lags,
         smooth_fn=smooth_mi_map
     )
-    return (input_map,)
+    return input_map, lags, scales
 
 
 @app.cell
@@ -561,7 +561,7 @@ def _(np, plt):
         return RectBivariateSpline(scales, lags, smoothed,kx=3,ky=3)
 
 
-    def plot_spline_field(M, scales, lags, upsample_scale=4, upsample_lag=4,ridge=None):
+    def plot_spline_field(M, scales, lags, upsample_scale=4, upsample_lag=4,ridge=None, title="Spline-interpolated field M(s, τ)"):
         # Build dense grid
         s_dense = np.linspace(scales.min(), scales.max(), len(scales)*upsample_scale)
         t_dense = np.linspace(lags.min(), lags.max(), len(lags)*upsample_lag)
@@ -585,7 +585,7 @@ def _(np, plt):
         plt.xlabel("Lag τ")
         plt.ylabel("Scale s")
         plt.yscale('log')
-        plt.title("Spline-interpolated field M(s, τ)")
+        plt.title(title)
         plt.tight_layout()
         plt.show()
 
@@ -607,7 +607,7 @@ def _(build_field, np, results_snp, smooth_mi_map):
 def _(M, np, plot_raw_mi_map, plot_spline_field, results_snp):
     plot_raw_mi_map(np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),
                     scales=results_snp[0]["S&P500"]["scales"],
-                    lags=np.linspace(-800, 800, 400+400+1),title="Raw input MI map BTC")
+                    lags=np.linspace(-800, 800, 400+400+1),title="Raw input MI map S&P500")
     plot_spline_field(M,
                     scales=results_snp[0]["S&P500"]["scales"],
                     lags=np.linspace(-800, 800, 400+400+1))
@@ -626,6 +626,16 @@ def _(mo):
 def _(M):
     print(M(0,0))
     print(M(25,range(0,100)))
+    return
+
+
+@app.cell
+def _(M, np, plot_spline_field, results_snp):
+    for dx,dy in [(1,0),(2,0),(0,1),(0,2)]:
+        dM = lambda x,y: M(x,y,dx=dx,dy=dy)
+        plot_spline_field(dM,
+                        scales=results_snp[0]["S&P500"]["scales"],
+                        lags=np.linspace(-800, 800, 400+400+1),title=f"Spline-interpolated field M(s, τ) ({dx} derivative in x, {dy} derivative in y)")
     return
 
 
@@ -805,6 +815,195 @@ def _(M, np, plot_ridge, plot_spline_field, results_snp, ridge_lags, sm):
     plot_spline_field(M,
                     scales=results_snp[0]["S&P500"]["scales"],
                     lags=np.linspace(-800, 800, 400+400+1),ridge=ridge_lags)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## finite difference partial derivatives
+    """)
+    return
+
+
+@app.cell
+def _(np, plt):
+    def finite_diff_derivatives(smoothed, scales, lags):
+        """
+        Compute first and second derivatives wrt lag using central differences.
+        smoothed: 2D array (n_scales × n_lags)
+        """
+        dτ = lags[1] - lags[0]
+
+        # First derivative wrt lag (axis=1)
+        dM_dlag = np.zeros_like(smoothed)
+        dM_dlag[:, 1:-1] = (smoothed[:, 2:] - smoothed[:, :-2]) / (2 * dτ)
+
+        # Second derivative wrt lag
+        d2M_dlag2 = np.zeros_like(smoothed)
+        d2M_dlag2[:, 1:-1] = (smoothed[:, 2:] - 2*smoothed[:, 1:-1] + smoothed[:, :-2]) / (dτ**2)
+
+        return dM_dlag, d2M_dlag2
+
+    def plot_field_array(Z, scales, lags, title="Field"):
+        plt.figure(figsize=(10, 6))
+        plt.imshow(
+            Z,
+            aspect="auto",
+            extent=[lags[0], lags[-1], scales[-1], scales[0]],
+            cmap="viridis"
+        )
+        plt.colorbar(label=title)
+        plt.xlabel("Lag τ")
+        plt.ylabel("Scale s")
+        plt.yscale('log')
+        plt.title(title)
+        plt.tight_layout()
+        plt.show()
+
+
+
+    return finite_diff_derivatives, plot_field_array
+
+
+@app.cell
+def _(
+    finite_diff_derivatives,
+    lags,
+    np,
+    plot_field_array,
+    results_snp,
+    scales,
+    sm,
+):
+    # Compute finite-difference derivatives
+    dM_dlag, d2M_dlag2 = finite_diff_derivatives(sm, results_snp[0]["S&P500"]["scales"], np.linspace(-800, 800, 801))
+
+    # Plot raw smoothed field
+    plot_field_array(sm, scales, lags, title="Smoothed MI")
+
+    # Plot first derivative wrt lag
+    plot_field_array(dM_dlag, scales, lags, title="∂M/∂τ (finite diff)")
+
+    # Plot second derivative wrt lag
+    plot_field_array(d2M_dlag2, scales, lags, title="∂²M/∂τ² (finite diff)")
+
+    return d2M_dlag2, dM_dlag
+
+
+@app.cell
+def _(finite_diff_derivatives, plt):
+    def plot_field(ax, Z, scales, lags, title, cmap="viridis"):
+        ax.imshow(
+            Z,
+            aspect="auto",
+            extent=[lags[0], lags[-1], scales[-1], scales[0]],
+            cmap=cmap,
+            interpolation=None
+        )
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel("Lag τ")
+        ax.set_ylabel("Scale s")
+        ax.set_yscale("log")
+
+    def plot_sigma_grid_finite_diff(input_map, scales, lags, sigma_pairs, smooth_fn):
+        assert len(sigma_pairs) == 16
+
+        fig, axes = plt.subplots(16, 3, figsize=(18, 48), constrained_layout=True)
+
+        for row, (σs, σt) in enumerate(sigma_pairs):
+
+            # 1) Smooth MI map
+            if σs == 0 and σt == 0:
+                sm = input_map
+                title = "raw (σ=0,0)"
+            else:
+                sm = smooth_fn(input_map, σs, σt)
+                title = f"σ_scale={σs}, σ_lag={σt}"
+
+            # 2) Finite-difference derivatives
+            dM, d2M = finite_diff_derivatives(sm, scales, lags)
+
+            # 3) Plot fields
+            plot_field(axes[row, 0], sm, scales, lags, title="Smoothed MI\n" + title)
+            plot_field(axes[row, 1], dM, scales, lags, title="∂M/∂τ (finite diff)")
+            plot_field(axes[row, 2], d2M, scales, lags, title="∂²M/∂τ² (finite diff)", cmap="magma")
+
+        plt.show()
+
+
+    return (plot_sigma_grid_finite_diff,)
+
+
+@app.cell
+def _(
+    np,
+    plot_sigma_grid_finite_diff,
+    results_btc,
+    results_snp,
+    sigma_pairs,
+    smooth_mi_map,
+):
+    plot_sigma_grid_finite_diff(
+        input_map=np.array(results_btc[0]["BTC"]["mi_map_normalized"]),
+        scales=results_snp[0]["S&P500"]["scales"],
+        lags=np.linspace(-800, 800, 801),
+        sigma_pairs=sigma_pairs,
+        smooth_fn=smooth_mi_map
+    )
+
+    return
+
+
+@app.cell
+def _(np):
+    def extract_ridge_finite_diff(smoothed, dM, d2M, scales, lags):
+        ridge = np.full(len(scales), np.nan)
+
+        for i, s in enumerate(scales):
+            dM_row = dM[i]
+            d2M_row = d2M[i]
+
+            # zero-crossings of dM
+            idx = np.where(np.diff(np.sign(dM_row)))[0]
+            if len(idx) == 0:
+                continue
+
+            candidates = []
+            for j in idx:
+                τ = lags[j]
+                if d2M_row[j] < 0:   # true maximum
+                    candidates.append((τ, d2M_row[j]))
+
+            if not candidates:
+                continue
+
+            # pick strongest maximum (most negative curvature)
+            τ_best, _ = min(candidates, key=lambda x: x[1])
+            ridge[i] = τ_best
+
+        return ridge
+
+
+    return (extract_ridge_finite_diff,)
+
+
+@app.cell
+def _(
+    d2M_dlag2,
+    dM_dlag,
+    extract_ridge_finite_diff,
+    lags,
+    plot_ridge,
+    scales,
+    sm,
+):
+    # Compute finite-difference derivatives
+    # dM_dlag, d2M_dlag2 = finite_diff_derivatives(sm, results_snp[0]["S&P500"]["scales"], np.linspace(-800, 800, 801))
+
+    ridge = extract_ridge_finite_diff(sm, dM_dlag, d2M_dlag2, scales, lags)
+
+    plot_ridge(d2M_dlag2,scales,lags,ridge)
     return
 
 
