@@ -82,15 +82,15 @@ def _(gaussian_filter, np, plt):
         # Create synthetic 2D field
         scales = np.linspace(1, 20, 100)
         lags = np.linspace(-200, 200, 300)
-    
+
         S, L = np.meshgrid(scales, lags, indexing="ij")
-    
+
         # True ridge: a simple curve
         true_ridge = 0.5 * (S - 10)
-    
+
         # Base field: Gaussian bump around the ridge
         field = np.exp(-0.5 * ((L - true_ridge) / 10)**2)
-    
+
         # Add noise
         np.random.seed(0)
         noisy_field = field + 0.3 * np.random.randn(*field.shape)
@@ -98,9 +98,9 @@ def _(gaussian_filter, np, plt):
 
         plt.imshow(noisy_field,aspect='auto',extent=[lags[0], lags[-1], scales[-1], scales[0]])
         plt.show()
-    
+
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    
+
         for ax, (s_scale, s_lag) in zip(axes.flat, sigmas):
             sm = gaussian_filter(noisy_field, sigma=[s_scale, s_lag])
             sm = ax.imshow(sm, aspect="auto", extent=[lags[0], lags[-1], scales[-1], scales[0]], cmap="viridis")
@@ -193,7 +193,7 @@ def _(np, plt):
         plt.colorbar(label="MI")
         plt.tight_layout()
         plt.show()
-    
+
     def plot_comparison_with_ridges(input_map, scales, sigmas, lags, smooth_fn):
         """
         input_map : 2D MI map (scales × lags)
@@ -377,8 +377,6 @@ def _(np, plot_sigma_grid_with_ridges, results_snp, smooth_mi_map):
         sigma_pairs=sigma_pairs,
         smooth_fn=smooth_mi_map
     )
-
-
 
     return (sigma_pairs,)
 
@@ -718,7 +716,6 @@ def _(
         sigma_pairs=sigma_pairs,
         smooth_fn=smooth_mi_map
     )
-
     return
 
 
@@ -775,7 +772,7 @@ def _(np):
 
 @app.cell
 def _(plt):
-    def plot_ridge(input_map, scales, lags, ridge_lags, title="Ridge"):
+    def plot_ridge(input_map, scales, lags, ridges, title="Ridge"):
         plt.figure(figsize=(10, 6))
         plt.imshow(
             input_map,
@@ -784,7 +781,8 @@ def _(plt):
             cmap="viridis",
             interpolation=None
         )
-        plt.plot(ridge_lags, scales, color="red", linewidth=2, label="Ridge")
+        for ind,ridge in enumerate(ridges):
+            plt.plot(ridge, scales, lw=1, ls=':', label=f"Ridge {ind}")
         plt.xlabel("Lag τ")
         plt.ylabel("Scale s")
         plt.yscale("log")
@@ -887,8 +885,7 @@ def _(
 
     # Plot second derivative wrt lag
     plot_field_array(d2M_dlag2, scales, lags, title="∂²M/∂τ² (finite diff)")
-
-    return d2M_dlag2, dM_dlag
+    return (d2M_dlag2,)
 
 
 @app.cell
@@ -951,12 +948,13 @@ def _(
         sigma_pairs=sigma_pairs,
         smooth_fn=smooth_mi_map
     )
-
     return
 
 
 @app.cell
-def _(np):
+def _(np, plt):
+    from scipy.signal import argrelextrema
+
     def extract_ridge_finite_diff(smoothed, dM, d2M, scales, lags):
         ridge = np.full(len(scales), np.nan)
 
@@ -981,29 +979,147 @@ def _(np):
             # pick strongest maximum (most negative curvature)
             τ_best, _ = min(candidates, key=lambda x: x[1])
             ridge[i] = τ_best
-
+            print(len(candidates))
+            plt.plot(dM_row)
+            plt.plot(d2M_row)
+            plt.title(f"{s}")
+            plt.show()
         return ridge
 
+    def quad_interp(y, j):
+        a, b, c = y[j-1], y[j], y[j+1]
+        return j + 0.5 * (a - c) / (a - 2*b + c)
 
-    return (extract_ridge_finite_diff,)
+    def extract_topN_ridges(smoothed, d2M, scales, lags, N=3):
+        S, T = smoothed.shape
+        ridges = np.full((N, S), np.nan)
+
+        # For each scale, collect all candidates
+        all_candidates = []
+        for i in range(S):
+            row = smoothed[i]
+            d2 = d2M[i]
+
+            idx = argrelextrema(row, np.greater)[0]
+            candidates = []
+
+            for j in idx:
+                if j == 0 or j == T-1:
+                    continue
+
+                τ_idx = quad_interp(row, j)  # sub-sample index
+                τ = np.interp(τ_idx, np.arange(len(lags)), lags)  # convert to lag
+
+                score = -d2[j]  # sharper peak = better
+
+                if score > 0:
+                    candidates.append((τ, score))
+
+            # sort by score descending
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            all_candidates.append(candidates)
+
+        # Track N ridges across scales
+        for k in range(N):
+            prev_tau = None
+
+            for i in range(S):
+                candidates = all_candidates[i]
+                if not candidates:
+                    continue
+
+                if prev_tau is None:
+                    # first scale: pick k-th best if exists
+                    if len(candidates) > k:
+                        τ = candidates[k][0]
+                    else:
+                        τ = candidates[-1][0]
+                else:
+                    # pick candidate closest to previous τ
+                    τ = min(candidates, key=lambda x: abs(x[0] - prev_tau))[0]
+
+                ridges[k, i] = τ
+                prev_tau = τ
+
+        return ridges
+
+
+
+    return (extract_topN_ridges,)
 
 
 @app.cell
 def _(
-    d2M_dlag2,
-    dM_dlag,
-    extract_ridge_finite_diff,
+    extract_topN_ridges,
+    finite_diff_derivatives,
     lags,
+    np,
     plot_ridge,
+    results_btc,
+    results_snp,
     scales,
-    sm,
+    smooth_mi_map,
 ):
     # Compute finite-difference derivatives
-    # dM_dlag, d2M_dlag2 = finite_diff_derivatives(sm, results_snp[0]["S&P500"]["scales"], np.linspace(-800, 800, 801))
+    def extract_n_ridges_and_plot(input=np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),n_ridges=3,plot_derrivatives=False,title=""):
+    
+        sm = smooth_mi_map(input, 1,2)
+    
+    
+        dM_dlag, d2M_dlag2 = finite_diff_derivatives(sm, results_snp[0]["S&P500"]["scales"], np.linspace(-800, 800, 801))
+    
+        # ridge = extract_ridge_finite_diff(sm, dM_dlag, d2M_dlag2, scales, lags)
+    
+        ridges = extract_topN_ridges(input, d2M_dlag2, scales, lags,n_ridges)
+        if plot_derrivatives:
+            # Plot first derivative wrt lag
+            plot_ridge(dM_dlag, scales, lags,ridges, title=f"{title} ∂M/∂τ (finite diff)")
+        
+            # Plot second derivative wrt lag
+            plot_ridge(d2M_dlag2, scales, lags,ridges, title=f"{title} ∂²M/∂τ² (finite diff)")
+    
+        plot_ridge(sm,scales,lags,ridges,f"{title} smoothed map")
+    extract_n_ridges_and_plot(np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),7,plot_derrivatives=True,title="S&P500")
+    extract_n_ridges_and_plot(np.array(results_btc[0]["BTC"]["mi_map_normalized"]),7,plot_derrivatives=True,title="BTC")
+    return
 
-    ridge = extract_ridge_finite_diff(sm, dM_dlag, d2M_dlag2, scales, lags)
 
-    plot_ridge(d2M_dlag2,scales,lags,ridge)
+@app.cell
+def _(d2M_dlag2, lags, np, scales):
+    import plotly.graph_objects as go
+
+    # Convert your list of arrays into a 2D matrix
+    Z = np.array(d2M_dlag2)   # shape: (rows, cols)
+
+    # Create X and Y coordinate grids
+    Y = np.log10(scales)
+    X = lags
+    X, Y = np.meshgrid(X, Y)
+
+    fig = go.Figure(data=[
+        go.Surface(z=Z, x=X, y=Y, colorscale='Viridis',surfacecolor=Z)
+    ])
+
+    fig.update_layout(
+        title='Surface Plot of d2M_dlag2',
+        scene=dict(
+            xaxis_title='Index in each array',
+            yaxis_title='Array number',
+            zaxis_title='Value',
+            # zaxis=dict(range=[Z.min(), 2])
+        ),
+        autosize=True,
+        width=900,
+        height=700
+    )
+
+    fig.show()
+    return
+
+
+@app.cell
+def _(scales):
+    scales[15]
     return
 
 
