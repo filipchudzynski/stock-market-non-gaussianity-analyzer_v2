@@ -771,7 +771,7 @@ def _(np):
 
 @app.cell
 def _(plt):
-    def plot_ridge(input_map, scales, lags, ridges, title="Ridge"):
+    def plot_ridge(input_map, scales, lags, ridges, title="Ridge",widths=None):
         plt.figure(figsize=(10, 6))
         plt.imshow(
             input_map,
@@ -782,6 +782,18 @@ def _(plt):
         )
         for ind,ridge in enumerate(ridges):
             plt.plot(ridge, scales, lw=2, ls=':', label=f"Ridge {ind}")
+
+            if widths is not None:
+                width = widths[ind]
+                # plot horizontal error bars (ridge ± width/2)
+                plt.errorbar(
+                    ridge, scales,
+                    xerr=width / 2,
+                    fmt='none',
+                    ecolor='white',
+                    elinewidth=1,
+                    alpha=0.7
+                )
         plt.xlabel("Lag τ")
         plt.ylabel("Scale s")
         plt.yscale("log")
@@ -989,7 +1001,7 @@ def _(np, plt):
         a, b, c = y[j-1], y[j], y[j+1]
         return j + 0.5 * (a - c) / (a - 2*b + c)
 
-    def extract_topN_ridges(smoothed, d2M, scales, lags, N=3):
+    def extract_topN_ridges(smoothed, d2M, scales, lags, N=3,symetric=None):
         S, T = smoothed.shape
         ridges = np.full((N, S), np.nan)
 
@@ -1040,9 +1052,51 @@ def _(np, plt):
                 ridges[k, i] = τ
                 prev_tau = τ
 
-        return ridges
+        return ridges,None
 
-    def extract_topN_ridges_with_width(smoothed, d2M, scales, lags, N=3):
+    def zero_crossing_pos(x0, x1, y0, y1):
+        # linear interpolation of zero crossing between (x0, y0) and (x1, y1)
+        if y0 == y1:
+            return 0.5 * (x0 + x1)
+        return x0 - y0 * (x1 - x0) / (y1 - y0)
+
+    def ridge_width_from_d2(d2_row, lags, j):
+        n = len(d2_row)
+
+        # --- left side: find where d2 crosses from <0 to >=0 ---
+        jl = j
+        while jl > 0 and d2_row[jl] < 0:
+            jl -= 1
+
+        if jl == j:  # no negative region to the left
+            left_lag = lags[j]
+        else:
+            # interpolate zero crossing between jl and jl+1
+            x0, x1 = jl, jl + 1
+            y0, y1 = d2_row[x0], d2_row[x1]
+            zc_idx_left = zero_crossing_pos(x0, x1, y0, y1)
+            left_lag = np.interp(zc_idx_left, np.arange(n), lags)
+
+        # --- right side: find where d2 crosses from <0 to >=0 ---
+        jr = j
+        while jr < n - 1 and d2_row[jr] < 0:
+            jr += 1
+
+        if jr == j:  # no negative region to the right
+            right_lag = lags[j]
+        else:
+            x0, x1 = jr - 1, jr
+            y0, y1 = d2_row[x0], d2_row[x1]
+            zc_idx_right = zero_crossing_pos(x0, x1, y0, y1)
+            right_lag = np.interp(zc_idx_right, np.arange(n), lags)
+
+        width_total = right_lag - left_lag
+        width_left = lags[j] - left_lag
+        width_right = right_lag - lags[j]
+
+        return width_total, width_left, width_right
+
+    def extract_topN_ridges_with_width(smoothed, d2M, scales, lags, N=3,symetric=True):
         S, T = smoothed.shape
         ridges = np.full((N, S), np.nan)
         widths = np.full((N, S), np.nan)
@@ -1111,11 +1165,18 @@ def _(np, plt):
                 prev_tau = τ
 
                 # compute width from curvature
-                d2_val = d2M[i, j]
-                if d2_val < 0:
-                    dx = local_dx(j)
-                    width = np.sqrt(-2.0 / d2_val) * dx
-                    widths[k, i] = width
+                if symetric:
+                    d2_val = d2M[i, j]
+                    if d2_val < 0:
+                        dx = local_dx(j)
+                        width = np.sqrt(-2.0 / d2_val) * dx
+                        widths[k, i] = width
+                else:
+                    d2_row = d2M[i]
+                    width_total, width_left, width_right = ridge_width_from_d2(d2_row, lags, j)
+                    widths[k, i] = width_total
+                    # optionally store left/right if you want
+
 
         return ridges, widths
 
@@ -1136,7 +1197,7 @@ def _(
     smooth_mi_map,
 ):
     # Compute finite-difference derivatives
-    def extract_n_ridges_and_plot(input=np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),ridge_algorithm=extract_topN_ridges,n_ridges=3,plot_derrivatives=False,title=""):
+    def extract_n_ridges_and_plot(input=np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),ridge_algorithm=extract_topN_ridges,n_ridges=3,plot_derrivatives=False,title="",symetric=False):
 
         sm = smooth_mi_map(input, 1,2)
 
@@ -1145,15 +1206,15 @@ def _(
 
         # ridge = extract_ridge_finite_diff(sm, dM_dlag, d2M_dlag2, scales, lags)
 
-        ridges = ridge_algorithm(input, d2M_dlag2, scales, lags,n_ridges)
+        ridges,widths = ridge_algorithm(input, d2M_dlag2, scales, lags,n_ridges,symetric)
         if plot_derrivatives:
             # Plot first derivative wrt lag
-            plot_ridge(dM_dlag, scales, lags,ridges, title=f"{title} ∂M/∂τ (finite diff)")
+            plot_ridge(dM_dlag, scales, lags,ridges, title=f"{title} ∂M/∂τ (finite diff)",widths=widths)
 
             # Plot second derivative wrt lag
-            plot_ridge(d2M_dlag2, scales, lags,ridges, title=f"{title} ∂²M/∂τ² (finite diff)")
-
-        plot_ridge(sm,scales,lags,ridges,f"{title} smoothed map")
+            plot_ridge(d2M_dlag2, scales, lags,ridges, title=f"{title} ∂²M/∂τ² (finite diff)",widths=widths)
+        
+        plot_ridge(sm,scales,lags,ridges,f"{title} smoothed map",widths=widths)
     extract_n_ridges_and_plot(np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),extract_topN_ridges,7,plot_derrivatives=True,title="S&P500")
     extract_n_ridges_and_plot(np.array(results_btc[0]["BTC"]["mi_map_normalized"]),extract_topN_ridges,7,plot_derrivatives=True,title="BTC")
     return (extract_n_ridges_and_plot,)
@@ -1167,8 +1228,8 @@ def _(
     results_btc,
     results_snp,
 ):
-    extract_n_ridges_and_plot(np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),extract_topN_ridges_with_width,3,plot_derrivatives=True,title="S&P500")
-    extract_n_ridges_and_plot(np.array(results_btc[0]["BTC"]["mi_map_normalized"]),extract_topN_ridges_with_width,3,plot_derrivatives=True,title="BTC")
+    extract_n_ridges_and_plot(np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),extract_topN_ridges_with_width,3,plot_derrivatives=True,title="S&P500",symetric=False)
+    extract_n_ridges_and_plot(np.array(results_btc[0]["BTC"]["mi_map_normalized"]),extract_topN_ridges_with_width,3,plot_derrivatives=True,title="BTC",symetric=False)
     return
 
 
