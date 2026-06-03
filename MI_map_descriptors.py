@@ -770,7 +770,7 @@ def _(np):
 
 
 @app.cell
-def _(plt):
+def _(np, plt):
     def plot_ridge(input_map, scales, lags, ridges, title="Ridge",widths=None):
         plt.figure(figsize=(10, 6))
         plt.imshow(
@@ -784,16 +784,15 @@ def _(plt):
             plt.plot(ridge, scales, lw=2, ls=':', label=f"Ridge {ind}")
 
             if widths is not None:
-                width = widths[ind]
-                # plot horizontal error bars (ridge ± width/2)
-                plt.errorbar(
-                    ridge, scales,
-                    xerr=width / 2,
-                    fmt='none',
-                    ecolor='white',
-                    elinewidth=1,
-                    alpha=0.7
-                )
+            # unpack tuple widths
+                left = np.array([w[0] for w in widths[ind]])
+                right = np.array([w[1] for w in widths[ind]])
+    
+                # left boundary
+                plt.plot(ridge - left, scales, lw=1, ls='--', color='white')
+    
+                # right boundary
+                plt.plot(ridge + right, scales, lw=1, ls='--', color='white')
         plt.xlabel("Lag τ")
         plt.ylabel("Scale s")
         plt.yscale("log")
@@ -1099,7 +1098,9 @@ def _(np, plt):
     def extract_topN_ridges_with_width(smoothed, d2M, scales, lags, N=3,symetric=True):
         S, T = smoothed.shape
         ridges = np.full((N, S), np.nan)
-        widths = np.full((N, S), np.nan)
+        widths = np.empty((N, S), dtype=object)
+        widths[:] = None
+
 
         # Precompute local dx for lag conversion
         lag_idx = np.arange(len(lags))
@@ -1174,7 +1175,7 @@ def _(np, plt):
                 else:
                     d2_row = d2M[i]
                     width_total, width_left, width_right = ridge_width_from_d2(d2_row, lags, j)
-                    widths[k, i] = width_total
+                    widths[k, i] = (width_left, width_right)
                     # optionally store left/right if you want
 
 
@@ -1213,7 +1214,7 @@ def _(
 
             # Plot second derivative wrt lag
             plot_ridge(d2M_dlag2, scales, lags,ridges, title=f"{title} ∂²M/∂τ² (finite diff)",widths=widths)
-        
+
         plot_ridge(sm,scales,lags,ridges,f"{title} smoothed map",widths=widths)
     extract_n_ridges_and_plot(np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),extract_topN_ridges,7,plot_derrivatives=True,title="S&P500")
     extract_n_ridges_and_plot(np.array(results_btc[0]["BTC"]["mi_map_normalized"]),extract_topN_ridges,7,plot_derrivatives=True,title="BTC")
