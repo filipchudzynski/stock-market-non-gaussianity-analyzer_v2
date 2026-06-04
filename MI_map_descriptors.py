@@ -787,10 +787,10 @@ def _(np, plt):
             # unpack tuple widths
                 left = np.array([w[0] for w in widths[ind]])
                 right = np.array([w[1] for w in widths[ind]])
-    
+
                 # left boundary
                 plt.plot(ridge - left, scales, lw=1, ls='--', color='white')
-    
+
                 # right boundary
                 plt.plot(ridge + right, scales, lw=1, ls='--', color='white')
         plt.xlabel("Lag τ")
@@ -895,7 +895,7 @@ def _(
 
     # Plot second derivative wrt lag
     plot_field_array(d2M_dlag2, scales, lags, title="∂²M/∂τ² (finite diff)")
-    return (d2M_dlag2,)
+    return
 
 
 @app.cell
@@ -1200,7 +1200,7 @@ def _(
     # Compute finite-difference derivatives
     def extract_n_ridges_and_plot(input=np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),ridge_algorithm=extract_topN_ridges,n_ridges=3,plot_derrivatives=False,title="",symetric=False):
 
-        sm = smooth_mi_map(input, 1,2)
+        sm = smooth_mi_map(input, 2,2)
 
 
         dM_dlag, d2M_dlag2 = finite_diff_derivatives(sm, results_snp[0]["S&P500"]["scales"], np.linspace(-800, 800, 801))
@@ -1234,42 +1234,433 @@ def _(
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # fit gaussians
+    """)
+    return
+
+
 @app.cell
-def _(d2M_dlag2, lags, np, scales):
-    import plotly.graph_objects as go
+def _(np, plt, smooth_mi_map):
+    from lmfit import Model
+    def split_gaussian(x, amplitude, center, sigma_left, sigma_right):
+        sigma = np.where(x < center, sigma_left, sigma_right)
+        return amplitude * np.exp(-0.5 * ((x - center) / sigma) ** 2)
+    
+    def fit_single_ridge(row, lags, prev_params=None,
+                         center_init=0.0, center_range=150.0,
+                         sigma_init=30.0, sigma_min=2.0, sigma_max=400.0,
+                         amplitude_thresh=0.05):
+        """
+        Fit a single asymmetric Gaussian to one scale row.
+    
+        Key fix: subtract row baseline before fitting so the peak
+        is defined relative to background, not absolute MI level.
+        """
+        model = Model(split_gaussian)
 
-    # Convert your list of arrays into a 2D matrix
-    Z = np.array(d2M_dlag2)   # shape: (rows, cols)
+        # ── baseline subtraction ──────────────────────────────────────────
+        # Use a percentile rather than min to be robust to outliers
+        baseline = np.percentile(row, 10)
+        row_centered = row - baseline
+        row_range = row_centered.max()
 
-    # Create X and Y coordinate grids
-    Y = np.log10(scales)
-    X = lags
-    X, Y = np.meshgrid(X, Y)
+        # Reject flat rows early — nothing to fit
+        if row_range < amplitude_thresh:
+            return None, False
 
-    fig = go.Figure(data=[
-        go.Surface(z=Z, x=X, y=Y, colorscale='Viridis',surfacecolor=Z)
-    ])
+        # Normalise to [0,1] for stable fitting, rescale result after
+        row_norm = row_centered / row_range
 
-    fig.update_layout(
-        title='Surface Plot of d2M_dlag2',
-        scene=dict(
-            xaxis_title='Index in each array',
-            yaxis_title='Array number',
-            zaxis_title='Value',
-            # zaxis=dict(range=[Z.min(), 2])
-        ),
-        autosize=True,
-        width=900,
-        height=700
+        # ── params ───────────────────────────────────────────────────────
+        if prev_params is not None:
+            params = prev_params.copy()
+            params['center'].set(
+                min=params['center'].value - center_range,
+                max=params['center'].value + center_range,
+            )
+            # Reset amplitude to current row's scale
+            params['amplitude'].set(value=1.0, min=amplitude_thresh, max=1.5)
+        else:
+            params = model.make_params(
+                amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
+                center=dict(value=center_init,
+                            min=center_init - center_range,
+                            max=center_init + center_range),
+                sigma_left=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+                sigma_right=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+            )
+
+        try:
+            result = model.fit(row_norm, params, x=lags)
+        except Exception:
+            return None, False
+
+        # ── quality checks ────────────────────────────────────────────────
+        p = result.params
+        amp    = p['amplitude'].value
+        sl     = p['sigma_left'].value
+        sr     = p['sigma_right'].value
+        center = p['center'].value
+
+        failed = (
+            not result.success
+            or amp < amplitude_thresh           # too weak
+            or sl >= sigma_max * 0.95           # sigma hit bound → degenerate
+            or sr >= sigma_max * 0.95
+            or not (lags[0] < center < lags[-1])# center outside data range
+            or result.redchi > 1.0              # poor fit quality
+        )
+
+        if failed:
+            return None, False
+
+        # Store row_range so caller can rescale amplitude if needed
+        result.row_range = row_range
+        result.baseline  = baseline
+        return result, True
+
+
+    def extract_single_ridge_lmfit(mi_map, scales, lags,
+                                    smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+                                    center_init=0.0, center_range=150.0,
+                                    sigma_init=30.0, sigma_max=400.0,
+                                    amplitude_thresh=0.05,
+                                    fit_window=None):
+        """
+        fit_window : (lag_min, lag_max) or None.
+                     Restrict fitting to a lag sub-window around the expected ridge.
+                     Dramatically helps when large-scale rows are flat outside the peak.
+        """
+        sm = smooth_mi_map(mi_map,
+                           sigma_scale=smooth_sigma_scale,
+                           sigma_lag=smooth_sigma_lag)
+
+        # Optionally restrict to a lag window
+        if fit_window is not None:
+            lo, hi = fit_window
+            mask = (lags >= lo) & (lags <= hi)
+            lags_fit = lags[mask]
+            sm_fit   = sm[:, mask]
+        else:
+            lags_fit = lags
+            sm_fit   = sm
+
+        n_scales    = len(scales)
+        centers     = np.full(n_scales, np.nan)
+        sigma_left  = np.full(n_scales, np.nan)
+        sigma_right = np.full(n_scales, np.nan)
+        amplitudes  = np.full(n_scales, np.nan)
+        success     = np.zeros(n_scales, dtype=bool)
+
+        prev_params  = None
+        fail_streak  = 0
+        MAX_FAILS    = 5   # reset warm-start after this many consecutive failures
+
+        # coarse → fine
+        for i in range(n_scales - 1, -1, -1):
+            row = sm_fit[i]
+
+            result, ok = fit_single_ridge(
+                row, lags_fit,
+                prev_params=prev_params,
+                center_init=center_init,
+                center_range=center_range,
+                sigma_init=sigma_init,
+                sigma_max=sigma_max,
+                amplitude_thresh=amplitude_thresh,
+            )
+
+            if ok:
+                p = result.params
+                centers[i]     = p['center'].value
+                sigma_left[i]  = p['sigma_left'].value
+                sigma_right[i] = p['sigma_right'].value
+                amplitudes[i]  = p['amplitude'].value * result.row_range
+                success[i]     = True
+                prev_params    = result.params
+                fail_streak    = 0
+            else:
+                fail_streak += 1
+                if fail_streak >= MAX_FAILS:
+                    prev_params = None   # full reset — don't keep dragging a bad estimate
+                    fail_streak = 0
+
+        return centers, sigma_left, sigma_right, amplitudes, success
+
+    def plot_fit_at_scale(ax, sm, lags, scales, centers, sigma_left, sigma_right, success,
+                          target_scale=100.0):
+        """
+        On ax: scatter of raw smoothed row + fitted split-Gaussian overlay at the
+        scale closest to target_scale.
+        """
+        # find closest scale index
+        i = np.argmin(np.abs(scales - target_scale))
+        actual_scale = scales[i]
+        row = sm[i]
+
+        # baseline-subtract same way as during fitting
+        baseline = np.percentile(row, 10)
+        row_display = row - baseline
+
+        ax.scatter(lags, row_display, s=6, color='steelblue', alpha=0.6, label='data (baseline sub.)')
+
+        if success[i]:
+            # reconstruct fitted curve
+            fitted = split_gaussian(lags,
+                                    amplitude=(row_display.max()),  # rescale to data
+                                    center=centers[i],
+                                    sigma_left=sigma_left[i],
+                                    sigma_right=sigma_right[i])
+            ax.plot(lags, fitted, 'r-', lw=1.8, label='fit')
+
+            # mark center and sigmas
+            ax.axvline(centers[i],                  color='white',  lw=1.0, ls='--')
+            ax.axvline(centers[i] - sigma_left[i],  color='cyan',   lw=0.8, ls=':')
+            ax.axvline(centers[i] + sigma_right[i], color='orange', lw=0.8, ls=':')
+
+            ax.set_title(f"Fit at s={actual_scale:.0f}  "
+                         f"μ={centers[i]:.1f}  "
+                         f"σL={sigma_left[i]:.1f}  σR={sigma_right[i]:.1f}")
+        else:
+            ax.set_title(f"Fit at s={actual_scale:.0f} — FAILED")
+
+        ax.set_xlabel('Lag τ')
+        ax.set_ylabel('MI (baseline sub.)')
+        ax.legend(fontsize=8)
+        ax.set_facecolor('#1a1a2e')
+
+
+    def plot_single_ridge_lmfit(mi_map, scales, lags,
+                                 centers, sigma_left, sigma_right,
+                                 amplitudes, success, title="",
+                                 smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+                                 diagnostic_scale=100.0):
+        sm = smooth_mi_map(mi_map, smooth_sigma_scale, smooth_sigma_lag)
+
+        plt.pcolormesh(lags, scales, sm, cmap='viridis', shading='auto')
+        plt.yscale('log')
+        plt.xlabel('Lag τ')
+        plt.ylabel('Scale s')
+        plt.title(f"{title}")
+        plt.show()
+
+    
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10),
+                                 gridspec_kw={'width_ratios': [3, 1],
+                                              'height_ratios': [2, 1]})
+
+        # ── top-left: heatmap ─────────────────────────────────────────────
+        ax = axes[0, 0]
+        pcm = ax.pcolormesh(lags, scales, sm, cmap='viridis', shading='auto')
+        ax.set_yscale('log')
+        ax.set_xlabel('Lag τ')
+        ax.set_ylabel('Scale s')
+        ax.set_title(f"{title} — asymmetric ridge (lmfit)")
+        plt.colorbar(pcm, ax=ax, label='MI')
+
+        s_ok  = scales[success]
+        c_ok  = centers[success]
+        sl_ok = sigma_left[success]
+        sr_ok = sigma_right[success]
+
+        ax.plot(c_ok,         s_ok, 'w--',                lw=1.5, label='center')
+        ax.plot(c_ok - sl_ok, s_ok, color='cyan',  lw=1, ls=':', label='−σ_left')
+        ax.plot(c_ok + sr_ok, s_ok, color='orange', lw=1, ls=':', label='+σ_right')
+
+        # mark the diagnostic scale with a horizontal line
+        ax.axhline(diagnostic_scale, color='red', lw=0.8, ls='--', alpha=0.6)
+        ax.legend(fontsize=8)
+
+        s_fail = scales[~success]
+        if len(s_fail):
+            ax.scatter(np.zeros(len(s_fail)), s_fail, c='red', s=4, zorder=5)
+
+        # ── top-right: asymmetry ratio ────────────────────────────────────
+        ax2 = axes[0, 1]
+        ratio = sr_ok / sl_ok
+        ax2.plot(ratio, s_ok, 'k-o', ms=2)
+        ax2.axvline(1.0, color='gray', lw=0.8, ls='--')
+        ax2.set_xscale('log')
+        ax2.set_yscale('log')
+        ax2.set_xlabel('σ_right / σ_left')
+        ax2.set_ylabel('Scale s')
+        ax2.set_title('Asymmetry ratio')
+
+        # ── bottom-left: single scale fit diagnostic ──────────────────────
+        ax3 = axes[1, 0]
+        ax3.set_facecolor('#1a1a2e')
+        plot_fit_at_scale(ax3, sm, lags, scales,
+                          centers, sigma_left, sigma_right, success,
+                          target_scale=diagnostic_scale)
+
+        # ── bottom-right: unused — can show residuals or leave blank ──────
+        axes[1, 1].axis('off')
+
+        plt.suptitle(title, fontsize=12, y=1.01)
+        plt.tight_layout()
+        plt.show()
+
+
+    # ── entry point ────────────────────────────────────────────────────────────────
+
+    def extract_single_ridge_and_plot(
+            mi_map=None, scales=None, lags=None,
+            title="",
+            center_init=0.0, center_range=150.0,
+            sigma_init=30.0, sigma_max=200.0,
+            amplitude_thresh=0.05,
+            smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+            diagnostic_scale=100.0,
+            fit_window=None,      # e.g. (-200, 200) to restrict lag range
+    ):
+        mi_map = np.array(mi_map)
+
+        centers, sl, sr, amp, ok = extract_single_ridge_lmfit(
+            mi_map, scales, lags,
+            smooth_sigma_scale=smooth_sigma_scale,
+            smooth_sigma_lag=smooth_sigma_lag,
+            center_init=center_init,
+            center_range=center_range,
+            sigma_init=sigma_init,
+            sigma_max=sigma_max,
+            amplitude_thresh=amplitude_thresh,
+            fit_window=fit_window,
+        )
+
+        plot_single_ridge_lmfit(
+            mi_map, scales, lags,
+            centers, sl, sr, amp, ok,
+            title=title,
+            smooth_sigma_scale=smooth_sigma_scale,
+            smooth_sigma_lag=smooth_sigma_lag,
+            diagnostic_scale=diagnostic_scale
+        )
+
+        print(f"Successful fits: {ok.sum()} / {len(ok)}")
+        return centers, sl, sr, amp, ok
+
+    return extract_single_ridge_and_plot, split_gaussian
+
+
+@app.cell
+def _(extract_single_ridge_and_plot, np, results_snp, scales):
+    centers, sl, sr, amp, ok = extract_single_ridge_and_plot(
+        mi_map          = np.array(results_snp[0]["S&P500"]["mi_map"]),
+        scales          = scales,
+        lags            = np.linspace(-800, 800, 801),
+        title           = "S&P500",
+        center_init     = 0.0,
+        center_range    = 100.0,
+        sigma_init      = 20.0,
+        sigma_max       = 200.0,       # tighter than before
+        amplitude_thresh= 0.05,
+        diagnostic_scale=400.0,
+        fit_window      = (-300, 300), # ignore flat tails entirely
+        smooth_sigma_lag= 0,smooth_sigma_scale=0
     )
+    return
 
-    fig.show()
+
+@app.cell
+def _(extract_single_ridge_and_plot, np, results_snp, scales):
+    extract_single_ridge_and_plot(
+        mi_map          = np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),
+        scales          = scales,
+        lags            = np.linspace(-800, 800, 801),
+        title           = "S&P500",
+        center_init     = 0.0,
+        center_range    = 100.0,
+        sigma_init      = 20.0,
+        sigma_max       = 200.0,       # tighter than before
+        amplitude_thresh= 0.05,
+        fit_window      = (-300, 300), # ignore flat tails entirely
+        smooth_sigma_lag= 0,smooth_sigma_scale=0
+    )
+    return
+
+
+@app.cell
+def _(extract_single_ridge_and_plot, np, results_btc, scales):
+    extract_single_ridge_and_plot(
+        mi_map          = np.array(results_btc[0]["BTC"]["mi_map_normalized"]),
+        scales          = scales,
+        lags            = np.linspace(-800, 800, 801),
+        title           = "BTC",
+        center_init     = 0.0,
+        center_range    = 100.0,
+        sigma_init      = 20.0,
+        sigma_max       = 200.0,       # tighter than before
+        amplitude_thresh= 0.05,
+        fit_window      = (-300, 300), # ignore flat tails entirely
+        smooth_sigma_lag= 0,smooth_sigma_scale=0
+    )
+    return
+
+
+@app.cell
+def _(extract_single_ridge_and_plot, np, results_btc, scales):
+    extract_single_ridge_and_plot(
+        mi_map          = np.array(results_btc[0]["BTC"]["mi_map"]),
+        scales          = scales,
+        lags            = np.linspace(-800, 800, 801),
+        title           = "BTC",
+        center_init     = 0.0,
+        center_range    = 100.0,
+        sigma_init      = 20.0,
+        sigma_max       = 200.0,       # tighter than before
+        amplitude_thresh= 0.05,
+        fit_window      = (-300, 300), # ignore flat tails entirely
+        smooth_sigma_lag= 0,smooth_sigma_scale=0
+    )
+    return
+
+
+@app.cell
+def _():
+    # import plotly.graph_objects as go
+
+    # # Convert your list of arrays into a 2D matrix
+    # Z = np.array(d2M_dlag2)   # shape: (rows, cols)
+
+    # # Create X and Y coordinate grids
+    # Y = np.log10(scales)
+    # X = lags
+    # X, Y = np.meshgrid(X, Y)
+
+    # fig = go.Figure(data=[
+    #     go.Surface(z=Z, x=X, y=Y, colorscale='Viridis',surfacecolor=Z)
+    # ])
+
+    # fig.update_layout(
+    #     title='Surface Plot of d2M_dlag2',
+    #     scene=dict(
+    #         xaxis_title='Index in each array',
+    #         yaxis_title='Array number',
+    #         zaxis_title='Value',
+    #         # zaxis=dict(range=[Z.min(), 2])
+    #     ),
+    #     autosize=True,
+    #     width=900,
+    #     height=700
+    # )
+
+    # fig.show()
     return
 
 
 @app.cell
 def _(scales):
     scales[15]
+    return
+
+
+@app.cell
+def _(np, plt, split_gaussian):
+    plt.plot(np.linspace(-5,5,100),split_gaussian(np.linspace(-5,5,100),1,0,1,2))
+    plt.show()
     return
 
 
