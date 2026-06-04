@@ -1439,14 +1439,6 @@ def _(np, plt, smooth_mi_map):
                                  smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
                                  diagnostic_scale=100.0):
         sm = smooth_mi_map(mi_map, smooth_sigma_scale, smooth_sigma_lag)
-
-        plt.pcolormesh(lags, scales, sm, cmap='viridis', shading='auto')
-        plt.yscale('log')
-        plt.xlabel('Lag τ')
-        plt.ylabel('Scale s')
-        plt.title(f"{title}")
-        plt.show()
-
     
         fig, axes = plt.subplots(2, 2, figsize=(14, 10),
                                  gridspec_kw={'width_ratios': [3, 1],
@@ -1469,9 +1461,9 @@ def _(np, plt, smooth_mi_map):
         ax.plot(c_ok,         s_ok, 'w--',                lw=1.5, label='center')
         ax.plot(c_ok - sl_ok, s_ok, color='cyan',  lw=1, ls=':', label='−σ_left')
         ax.plot(c_ok + sr_ok, s_ok, color='orange', lw=1, ls=':', label='+σ_right')
-
-        # mark the diagnostic scale with a horizontal line
-        ax.axhline(diagnostic_scale, color='red', lw=0.8, ls='--', alpha=0.6)
+        if diagnostic_scale is not None:
+            # mark the diagnostic scale with a horizontal line
+            ax.axhline(diagnostic_scale, color='red', lw=0.8, ls='--', alpha=0.6)
         ax.legend(fontsize=8)
 
         s_fail = scales[~success]
@@ -1490,11 +1482,14 @@ def _(np, plt, smooth_mi_map):
         ax2.set_title('Asymmetry ratio')
 
         # ── bottom-left: single scale fit diagnostic ──────────────────────
-        ax3 = axes[1, 0]
-        ax3.set_facecolor('#1a1a2e')
-        plot_fit_at_scale(ax3, sm, lags, scales,
-                          centers, sigma_left, sigma_right, success,
-                          target_scale=diagnostic_scale)
+        if diagnostic_scale is not None:
+            ax3 = axes[1, 0]
+            ax3.set_facecolor('#1a1a2e')
+            plot_fit_at_scale(ax3, sm, lags, scales,
+                              centers, sigma_left, sigma_right, success,
+                              target_scale=diagnostic_scale)
+        else:
+            axes[1, 0].axis('off')
 
         # ── bottom-right: unused — can show residuals or leave blank ──────
         axes[1, 1].axis('off')
@@ -1542,79 +1537,171 @@ def _(np, plt, smooth_mi_map):
         print(f"Successful fits: {ok.sum()} / {len(ok)}")
         return centers, sl, sr, amp, ok
 
-    return extract_single_ridge_and_plot, split_gaussian
+    return (extract_single_ridge_and_plot,)
 
 
 @app.cell
 def _(extract_single_ridge_and_plot, np, results_snp, scales):
-    centers, sl, sr, amp, ok = extract_single_ridge_and_plot(
-        mi_map          = np.array(results_snp[0]["S&P500"]["mi_map"]),
-        scales          = scales,
-        lags            = np.linspace(-800, 800, 801),
-        title           = "S&P500",
-        center_init     = 0.0,
-        center_range    = 100.0,
-        sigma_init      = 20.0,
-        sigma_max       = 200.0,       # tighter than before
-        amplitude_thresh= 0.05,
-        diagnostic_scale=400.0,
-        fit_window      = (-300, 300), # ignore flat tails entirely
-        smooth_sigma_lag= 0,smooth_sigma_scale=0
-    )
-    return
-
-
-@app.cell
-def _(extract_single_ridge_and_plot, np, results_snp, scales):
-    extract_single_ridge_and_plot(
-        mi_map          = np.array(results_snp[0]["S&P500"]["mi_map_normalized"]),
-        scales          = scales,
-        lags            = np.linspace(-800, 800, 801),
-        title           = "S&P500",
-        center_init     = 0.0,
-        center_range    = 100.0,
-        sigma_init      = 20.0,
-        sigma_max       = 200.0,       # tighter than before
-        amplitude_thresh= 0.05,
-        fit_window      = (-300, 300), # ignore flat tails entirely
-        smooth_sigma_lag= 0,smooth_sigma_scale=0
-    )
-    return
+    snp_fits=[]
+    for _i in range(9):
+        snp_fits.append(extract_single_ridge_and_plot(
+            mi_map          = np.array(results_snp[_i]["S&P500"]["mi_map_normalized"]),
+            scales          = scales,
+            lags            = np.linspace(-800, 800, 801),
+            title           = "S&P500",
+            center_init     = 0.0,
+            center_range    = 100.0,
+            sigma_init      = 20.0,
+            sigma_max       = 200.0,       # tighter than before
+            amplitude_thresh= 0.05,
+            diagnostic_scale=None,
+            fit_window      = (-300, 300), # ignore flat tails entirely
+            smooth_sigma_lag= 0,smooth_sigma_scale=0
+        ))
+    return (snp_fits,)
 
 
 @app.cell
 def _(extract_single_ridge_and_plot, np, results_btc, scales):
-    extract_single_ridge_and_plot(
-        mi_map          = np.array(results_btc[0]["BTC"]["mi_map_normalized"]),
-        scales          = scales,
-        lags            = np.linspace(-800, 800, 801),
-        title           = "BTC",
-        center_init     = 0.0,
-        center_range    = 100.0,
-        sigma_init      = 20.0,
-        sigma_max       = 200.0,       # tighter than before
-        amplitude_thresh= 0.05,
-        fit_window      = (-300, 300), # ignore flat tails entirely
-        smooth_sigma_lag= 0,smooth_sigma_scale=0
-    )
+    btc_fits=[]
+    for _i in range(10):
+        btc_fits.append(extract_single_ridge_and_plot(
+            mi_map          = np.array(results_btc[_i]["BTC"]["mi_map_normalized"]),
+            scales          = scales,
+            lags            = np.linspace(-800, 800, 801),
+            title           = "S&P500",
+            center_init     = 0.0,
+            center_range    = 100.0,
+            sigma_init      = 20.0,
+            sigma_max       = 200.0,       # tighter than before
+            amplitude_thresh= 0.05,
+            diagnostic_scale=None,
+            fit_window      = (-300, 300), # ignore flat tails entirely
+            smooth_sigma_lag= 0,smooth_sigma_scale=0
+        ))
+    return (btc_fits,)
+
+
+@app.cell
+def _(btc_fits, np, plt, scales, snp_fits):
+    def plot_average_stats():
+        def compute_stats(fits):
+            arr = np.array(fits)              # shape: (n_fits, n_metrics, n_scales)
+            mean = arr.mean(axis=0)           # shape: (n_metrics, n_scales)
+            var  = arr.var(axis=0)            # shape: (n_metrics, n_scales)
+            return mean, var
+    
+        snp_mean, snp_var = compute_stats(snp_fits)
+        btc_mean, btc_var = compute_stats(btc_fits)
+    
+        metrics = ["ridge center", "σ_left ", "σ_right", "amplitude"]
+    
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        axes = axes.flatten()
+    
+        for i, metric in enumerate(metrics):
+            ax = axes[i]
+    
+            # SNP
+            ax.plot(scales, snp_mean[i], label="SNP mean", color="blue")
+            ax.fill_between(scales,
+                            snp_mean[i] - np.sqrt(snp_var[i]),
+                            snp_mean[i] + np.sqrt(snp_var[i]),
+                            color="blue", alpha=0.2)
+    
+            # BTC
+            ax.plot(scales, btc_mean[i], label="BTC mean", color="orange")
+            ax.fill_between(scales,
+                            btc_mean[i] - np.sqrt(btc_var[i]),
+                            btc_mean[i] + np.sqrt(btc_var[i]),
+                            color="orange", alpha=0.2)
+    
+            ax.set_xscale("log")
+            ax.set_title(f"{metric} comparison")
+            if i == 3:
+                ax.set_ylabel('amplitude')
+            else:    
+                ax.set_ylabel('Lag τ')
+            ax.set_xlabel('scale s')
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+    
+        plt.tight_layout()
+        plt.show()
+        return snp_mean,snp_var, btc_mean,btc_var
+    snp_mean,snp_var, btc_mean,btc_var=plot_average_stats()
     return
 
 
 @app.cell
-def _(extract_single_ridge_and_plot, np, results_btc, scales):
-    extract_single_ridge_and_plot(
-        mi_map          = np.array(results_btc[0]["BTC"]["mi_map"]),
-        scales          = scales,
-        lags            = np.linspace(-800, 800, 801),
-        title           = "BTC",
-        center_init     = 0.0,
-        center_range    = 100.0,
-        sigma_init      = 20.0,
-        sigma_max       = 200.0,       # tighter than before
-        amplitude_thresh= 0.05,
-        fit_window      = (-300, 300), # ignore flat tails entirely
-        smooth_sigma_lag= 0,smooth_sigma_scale=0
-    )
+def _(btc_fits, plt, scales, snp_fits):
+
+    components = ["ridge center", "σ_left ", "σ_right", "amplitude"]
+    datasets = {
+        "S&P": snp_fits,
+        "BTC": btc_fits
+    }
+
+    fig, axes = plt.subplots(nrows=4, ncols=2, figsize=(12, 14), sharex=True)
+
+    for comp_idx, comp_name in enumerate(components):
+        for col_idx, (label, fits) in enumerate(datasets.items()):
+            ax = axes[comp_idx, col_idx]
+
+            for _i, _result in enumerate(fits):
+                ax.plot(scales, _result[comp_idx], label=f"{label} {_i}")
+
+            ax.set_xscale("log")
+            ax.set_title(f"{label} – {comp_name}")
+            ax.grid(True, alpha=0.3)
+            if comp_idx == 3:
+                ax.set_ylabel('amplitude')
+            else:    
+                ax.set_ylabel('Lag τ')
+            ax.set_xlabel('scale s')
+            ax.legend(fontsize=8)
+
+    plt.tight_layout()
+    plt.show()
+
+    return
+
+
+@app.cell
+def _(np, plt, results_snp):
+    def plot_signal_grid():
+        fig, axes = plt.subplots(3, 3, figsize=(12, 10))
+        axes = axes.flatten()
+    
+        for i in range(9):
+            ax = axes[i]
+            signal = results_snp[i]["S&P500"]["signal"]
+            ax.plot(0.01 * np.exp(signal))
+            ax.set_title(f"S&P500 batch {i}")
+            ax.grid(True, alpha=0.3)
+    
+        plt.tight_layout()
+        plt.show()
+    plot_signal_grid()
+    return
+
+
+@app.cell
+def _(np, plt, results_btc):
+    def plot_signal_grid_btc():
+        fig, axes = plt.subplots(4, 3, figsize=(12, 10))
+        axes = axes.flatten()
+    
+        for i in range(10):
+            ax = axes[i]
+            signal = results_btc[i]["BTC"]["signal"]
+            ax.plot(np.exp(signal))
+            ax.set_title(f"btc batch {i}")
+            ax.grid(True, alpha=0.3)
+    
+        plt.tight_layout()
+        plt.show()
+    plot_signal_grid_btc()
     return
 
 
@@ -1654,13 +1741,6 @@ def _():
 @app.cell
 def _(scales):
     scales[15]
-    return
-
-
-@app.cell
-def _(np, plt, split_gaussian):
-    plt.plot(np.linspace(-5,5,100),split_gaussian(np.linspace(-5,5,100),1,0,1,2))
-    plt.show()
     return
 
 
