@@ -138,43 +138,34 @@
 
 \maketitle
 
+\section{Introduction}
+
+Financial markets exhibit complex temporal organisation, with volatility clustering, long‑range dependence, and multiscale structure. A central question in financial physics is how fluctuations at different temporal scales interact: whether they evolve independently, or whether they participate in a coordinated cascade‑like process reminiscent of turbulence, where events in long time scales propagate to shorter scales.
+
+Arneodo, Muzy and Sornette introduced the notion of an \emph{information cascade} in
+financial markets, emphasising how volatility propagates across temporal scales.
+The question remains whether \emph{the geometric properties} of the cascade structure itself contain valuable information about the market: how cross–scale dependence is organized in time, how asymmetric it is, and how these properties differ between markets.
+
+In this paper we propose a compact \emph{morphological} description of \textbf{mutual–information cascade maps}.
+By extracting and parametrising the dominant dependence ridge, we obtain a set of interpretable descriptors that summarise the temporal organisation of multiscale volatility interactions. We then compare these descriptors between a traditional equity index (S\&P500) and a cryptocurrency market (BTC), revealing systematic
+differences in their cross–scale dependence geometry suggesting difference in how those market process information.
+
+
 \section{Methodology} \label{sec:Methodology}
 
-
-In this work, we investigate the multiscale dependence structure of financial
-time series by analysing how volatility components interact across temporal
-scales. Our approach is conceptually motivated by the cascade picture of
-financial dynamics introduced by Arnéodo, Muzy and Sornette
-\cite{arneodo1998}, where information and volatility propagate from coarse to
-fine scales in a structured, directional manner.  
-In analogy with the multiplicative cascade models used in turbulence and
-financial time series, we treat the observed log–price fluctuations as the
-result of interacting scale components whose dependence structure can be
-revealed through a combination of wavelet decomposition and mutual–information
-analysis.
-
-The methodology consists of four main steps, each serving a distinct purpose in
-capturing the cascade–like organisation of volatility:
+The methodology consists of four main steps, each serving a distinct purpose in capturing the cascade–like organisation of volatility:
 
 \begin{enumerate}
     \item \textbf{Wavelet decomposition of log–price dynamics.}  
-    Following the spirit of multifractal cascade models, we first decompose the
-    log–price series into fluctuations at different temporal scales.  
-    A smoothed Haar wavelet is used to isolate local increments at scale $a$,
-    producing a multiresolution representation analogous to the scale–indexed
+    Following the spirit of multifractal cascade models, we first decompose the log–price series into fluctuations at different temporal scales. A smoothed Haar wavelet is used to isolate local increments at scale $a$, producing a multiresolution representation analogous to the scale–indexed
     increments in multiplicative cascade models.
 
     \item \textbf{Construction of multiscale log–volatility fields.}  
-    In cascade theory, the amplitude of fluctuations at each scale plays a
-    central role.  
-    To capture this, we compute a local energy measure (rolling RMS) of the
-    wavelet coefficients and take its logarithm, yielding a log–volatility field
-    $\ell_a(t)$ that reflects the instantaneous strength of fluctuations at
-    scale $a$.
+    In cascade theory, the amplitude of fluctuations at each scale plays a central role.  
+    To capture this, we compute a local energy measure (rolling RMS) of the wavelet coefficients and take its logarithm, yielding a log–volatility field $\ell_a(t)$ that reflects the instantaneous strength of fluctuations at scale $a$.
 
     \item \textbf{Mutual–information maps across scales and time lags.}  
-    The cascade picture predicts that fluctuations at one scale influence those
-    at neighbouring scales with a characteristic time delay.  
+    The cascade picture predicts that fluctuations at one scale influence those at neighbouring scales with a characteristic time delay.  
     To quantify this, we compute the mutual information between log–volatility
     components at different scales and time shifts.  
     The resulting mutual information map (MI map) $I(a,\tau)$ reveals the dominant lagged interactions
@@ -223,33 +214,15 @@ mechanism.
 The implementation details, numerical procedures, and stability considerations
 are presented separately in Section~\ref{sec:technical_details}.
 
-
-
-
-\section{Results} \label{sec:results}
 \begin{figure}
     \centering
     \includegraphics[width=1\linewidth]{ridge_fit_btc_batch_19.pdf}
     \caption{Enter Caption}
     \label{fig:placeholder}
 \end{figure}
-\subsection{Ridge--descriptor behaviour across scales}
 
-To analyse the cross--scale dependence structure, we first examined the 
-\textit{mean descriptor curves with variance} for both assets. This representation 
-highlights systematic differences between BTC and the S\&P500. In particular, the 
-\textbf{ridge centre} for BTC shifts progressively toward \textbf{positive lags} once the 
-scale exceeds approximately $10^{2}$. This indicates that large--scale volatility 
-components in BTC tend to exert their influence further into the future compared 
-to the corresponding behaviour observed in the S\&P500.
 
-A similar forward--directed tendency is visible in the right--hand width parameter 
-$\sigma_{\mathrm{right}}$. For BTC, $\sigma_{\mathrm{right}}$ increases more rapidly and extends 
-further toward positive lags, implying a longer persistence of the cascade 
-interaction in the direction of future time. Together, these observations suggest 
-that the BTC cascade exhibits a more pronounced forward--propagating structure, 
-consistent across batches and robust with respect to the variance of the 
-descriptor estimates.
+\section{Results} \label{sec:results}
 
 \begin{figure}[htbp]
     \centering
@@ -257,7 +230,42 @@ descriptor estimates.
     \caption{Enter Caption}
     \label{fig:placeholder}
 \end{figure}
+To compare the multiscale dependence geometry of the two assets, we examine the
+\textit{mean ridge--descriptor curves with variance}. Each descriptor captures a
+distinct aspect of the temporal organisation of cross--scale dependence.
 
+\paragraph{Ridge centre.}
+The \textbf{ridge centre} $\mu(a)$ identifies the lag at which
+dependence between scale $a$ and the reference scale is strongest. For small scales,
+BTC and the S\&P500 behave similarly, but beyond $10^{2}$ the BTC ridge centre
+shifts systematically toward \textbf{positive lags}. This indicates a more
+forward--aligned dependence structure, with large--scale BTC volatility remaining
+temporally connected to future fluctuations for longer offsets.
+
+\paragraph{Left width.}
+The \textbf{left width} $\sigma_{\mathrm{left}}$ measures how far dependence
+extends into negative lags. Both assets show broadly similar behaviour, with only
+modest differences at intermediate scales. Past--directed dependence is therefore
+not a major source of contrast between the two markets.
+
+\paragraph{Right width.}
+The \textbf{right width} $\sigma_{\mathrm{right}}$ quantifies the persistence of
+dependence into positive lags. BTC exhibits consistently larger right widths,
+especially at medium and large scales, indicating a \emph{longer forward persistence}
+of cross--scale interactions. This is the most pronounced geometric difference
+between the two assets.
+
+\paragraph{Amplitude.}
+The \textbf{amplitude} $A(a)$ reflects the overall strength of
+cross--scale coupling. $S\&P$ generally displays higher amplitudes, particularly at larger scales, suggesting a stronger and less dissipative multiscale interaction structure. Surprisingly amplitude remains almost flat for a range of scales between 10 to 40, as opposed to BTC where amplitude falls exponentially.
+
+
+The differences between BTC and the S\&P500 are not limited to any single descriptor but appear consistently across the entire geometry of the mutual--information ridge.
+BTC displays a markedly broader forward--directed interaction region at large scales, evident both in the displacement of the \textbf{ridge centre} toward positive lags and in the growth of the \textbf{right--hand width} parameter. S\&P500 on the other hand shows less dissipative properties, notably in its slower decrease of \textbf{amplitude}.
+
+Together, these features indicate a more persistent and forward--leaning scale--to--scale organisation of volatility compared with the more localised and symmetric structure observed in the S\&P500. 
+These findings show that the \textbf{mutual--information cascade}
+encodes market--specific geometric information beyond the mere presence of multifractality and provides a compact framework for distinguishing different classes of financial markets.
 
 \section{Technical Details}\label{sec:technical_details}
 
