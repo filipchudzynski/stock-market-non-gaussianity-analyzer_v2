@@ -96,61 +96,154 @@ def center_series(series):
     arr = np.asarray(series, dtype=float)
     return arr - np.mean(arr)
 
-
-def _compute_mi_task(args):
+# ---------------------------------------------------------------------
+# 1st PATH: one sklearn call per (scale, dt) pair.
+#
+# potentially wastefull due to repeated calls to mutual_info_regression for the same y vector (w_ref[dt:]).
+# ---------------------------------------------------------------------
+  
+def _compute_mi_task_legacy(args):
     s_idx, dt = args
     w_other = _worker_w_list[s_idx]
     w_ref = _worker_w_ref
-
+    random_state = 42  # pinned for reproducibility and so legacy/batched can be diffed meaningfully
     if dt >= 0:
         x = w_other[:-dt or None]
         y = w_ref[dt:]
     else:
         x = w_other[-dt:]
         y = w_ref[:dt or None]
-
+ 
     if len(x) < 10:
         return 0.0
-
-    return float(mutual_info_regression(x.reshape(-1, 1), y, n_jobs=1)[0])
-
+ 
+    return float(
+        mutual_info_regression(
+            x.reshape(-1, 1), y,
+            discrete_features=False,
+            n_jobs=1,  # inner parallelism off: outer Pool is already parallel over tasks
+            random_state=random_state,
+        )[0]
+    )
 
 def _init_worker(w_list, w_ref):
     global _worker_w_list, _worker_w_ref
     _worker_w_list = w_list
-    _worker_w_ref = w_ref
+    _worker_w_ref = w_ref 
 
 
-def compute_mutual_information_map(
+def _compute_mi_map_legacy(
     log_vol_series,
-    ref_idx=0,
-    max_time_lag=2,
-    use_parallel=False,
-    n_jobs=None,
+    ref_idx,
+    max_time_lag,
+    use_parallel,
+    n_jobs
 ):
-    """Compute the mutual information map between scales and time lags."""
-    log_vol_series = [center_series(log_vol) for log_vol in log_vol_series]
     w_ref = log_vol_series[ref_idx]
-
-    tasks = [(s_idx, dt) for s_idx in range(len(log_vol_series)) for dt in range(-max_time_lag, max_time_lag + 1)]
-
+    n_scales = len(log_vol_series)
+    tasks = [
+        (s_idx, dt)
+        for s_idx in range(n_scales)
+        for dt in range(-max_time_lag, max_time_lag + 1)
+    ]
+ 
     if use_parallel:
         if mp is None:
             raise ImportError("multiprocess is not installed. Install it or use use_parallel=False.")
         if n_jobs is None:
             n_jobs = mp.cpu_count()
-
+        # initializer sends log_vol_series/w_ref once per worker, not once per task
         with mp.Pool(processes=n_jobs, initializer=_init_worker, initargs=(log_vol_series, w_ref)) as pool:
-            results = pool.map(_compute_mi_task, tasks)
+            results = pool.map(_compute_mi_task_legacy, tasks)
     else:
         _init_worker(log_vol_series, w_ref)
-        results = [_compute_mi_task(task) for task in tasks]
-
-    I_map = np.zeros((len(log_vol_series), 2 * max_time_lag + 1))
+        results = [_compute_mi_task_legacy(t) for t in tasks]
+ 
+    I_map = np.zeros((n_scales, 2 * max_time_lag + 1))
     for (s_idx, dt), value in zip(tasks, results):
         I_map[s_idx, dt + max_time_lag] = value
-
     return I_map
+ 
+ 
+# ---------------------------------------------------------------------
+# BATCHED PATH: one sklearn call per dt, covering all scales at once
+# via a multi-column X matrix.
+#
+# Potentially more efficient than legacy path, since each y vector (w_ref[dt:]) is only computed once per dt.
+# ---------------------------------------------------------------------
+ 
+def _compute_mi_task_batched(args):
+    dt = args
+    w_list = _worker_w_list
+    w_ref = _worker_w_ref
+    random_state = 42  # pinned for reproducibility and so legacy/batched can be diffed meaningfully
+    
+    if dt >= 0:
+        y = w_ref[dt:]
+    else:
+        y = w_ref[:dt or None]
+ 
+    if len(y) < 10:
+        return dt, np.zeros(len(w_list))
+ 
+    X = np.column_stack([
+        (w[:-dt or None] if dt >= 0 else w[-dt:]) for w in w_list
+    ])
+ 
+    mi_values = mutual_info_regression(
+        X, y,
+        discrete_features=False,
+        n_jobs=1,  # see note above: outer Pool already parallelizes over dt
+        random_state=random_state,
+    )
+    return dt, mi_values
+ 
+ 
+def _compute_mi_map_batched(log_vol_series, ref_idx, max_time_lag,
+                             use_parallel, n_jobs):
+    w_ref = log_vol_series[ref_idx]
+    n_scales = len(log_vol_series)
+    dts = range(-max_time_lag, max_time_lag + 1)
+    tasks = [(dt) for dt in dts]
+ 
+    if use_parallel:
+        if mp is None:
+            raise ImportError("multiprocess is not installed. Install it or use use_parallel=False.")
+        n_jobs = n_jobs or min(mp.cpu_count(), len(tasks))
+        # chunksize tuned to task count here (~n_lags), not n_scales*n_lags as in legacy path
+        chunksize = max(1, len(tasks) // (n_jobs * 4))
+        with mp.Pool(processes=n_jobs, initializer=_init_worker, initargs=(log_vol_series, w_ref)) as pool:
+            results = pool.map(_compute_mi_task_batched, tasks, chunksize=chunksize)
+    else:
+        _init_worker(log_vol_series, w_ref)
+        results = [_compute_mi_task_batched(t) for t in tasks]
+ 
+    I_map = np.zeros((n_scales, 2 * max_time_lag + 1))
+    for dt, mi_values in results:
+        I_map[:, dt + max_time_lag] = mi_values
+    return I_map
+ 
+
+def compute_mutual_information_map(
+    log_vol_series,
+    ref_idx=0,
+    max_time_lag=400,
+    use_parallel=False,
+    n_jobs=None,
+    batched=False,       # "legacy" (original per-(scale,dt)) or "batched" (per-dt, multi-column)
+):
+    """Compute the mutual information map between scales and time lags.
+ 
+    method="legacy": original behavior, one sklearn call per (scale, dt).
+    method="batched": one sklearn call per dt across all scales at once.
+    """
+    log_vol_series = [center_series(v) for v in log_vol_series]
+ 
+    if batched:
+        return _compute_mi_map_batched(log_vol_series, ref_idx, max_time_lag, use_parallel, n_jobs)
+    else:
+        return _compute_mi_map_legacy(log_vol_series, ref_idx, max_time_lag, use_parallel, n_jobs)
+    
 
 
 def analyze_signal(
@@ -160,9 +253,10 @@ def analyze_signal(
     max_level=10,
     window=50,
     ref_idx=0,
-    max_time_lag=2,
+    max_time_lag=400,
     use_parallel=False,
     n_jobs=None,
+    batched=False,
 ):
     """Analyze one signal and return log-volatility and mutual-information results."""
     detail_series, scales = compute_wavelet_details_custom(signal, scales, wavelet=wavelet)
@@ -173,6 +267,7 @@ def analyze_signal(
         max_time_lag=max_time_lag,
         use_parallel=use_parallel,
         n_jobs=n_jobs,
+        batched=batched
     )
 
     return {
@@ -182,3 +277,10 @@ def analyze_signal(
         "log_vol_series": log_vol_series,
         "mi_map": mi_map,
     }
+
+def compare_signals(signals, **analysis_kwargs):
+    results = {}
+    for name, signal in signals.items():
+        results[name] = analyze_signal(signal, **analysis_kwargs)
+    return results
+
