@@ -24,7 +24,9 @@ def _():
 def _(np):
     results_snp=np.load("mi_map_snp_all.npy",allow_pickle=True)
     results_btc=np.load("mi_map_btc_all.npy",allow_pickle=True)
-    return results_btc, results_snp
+    results_snp_2=np.load("mi_map_snp_all_2nd.npy",allow_pickle=True)
+    results_btc_2=np.load("mi_map_btc_all_2.npy",allow_pickle=True)
+    return results_btc, results_btc_2, results_snp, results_snp_2
 
 
 @app.cell
@@ -242,8 +244,10 @@ def _(np, plt):
 
 
 @app.cell
-def _():
-    return
+def _(np, results_snp):
+    scales = results_snp[0]["S&P500"]["scales"]
+    lags = np.linspace(-800, 800, 801)  # or your actual lag array
+    return lags, scales
 
 
 @app.cell
@@ -1242,20 +1246,20 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(np, plt, smooth_mi_map):
     from lmfit import Model
     def split_gaussian(x, amplitude, center, sigma_left, sigma_right):
         sigma = np.where(x < center, sigma_left, sigma_right)
         return amplitude * np.exp(-0.5 * ((x - center) / sigma) ** 2)
-    
+
     def fit_single_ridge(row, lags, prev_params=None,
                          center_init=0.0, center_range=150.0,
                          sigma_init=30.0, sigma_min=2.0, sigma_max=400.0,
                          amplitude_thresh=0.05):
         """
         Fit a single asymmetric Gaussian to one scale row.
-    
+
         Key fix: subtract row baseline before fitting so the peak
         is defined relative to background, not absolute MI level.
         """
@@ -1439,7 +1443,7 @@ def _(np, plt, smooth_mi_map):
                                  smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
                                  diagnostic_scale=100.0):
         sm = smooth_mi_map(mi_map, smooth_sigma_scale, smooth_sigma_lag)
-    
+
         fig, axes = plt.subplots(2, 2, figsize=(14, 10),
                                  gridspec_kw={'width_ratios': [3, 1],
                                               'height_ratios': [2, 1]})
@@ -1541,11 +1545,18 @@ def _(np, plt, smooth_mi_map):
 
 
 @app.cell
-def _(extract_single_ridge_and_plot, np, results_snp, scales):
+def _(np, results_btc, results_btc_2, results_snp, results_snp_2):
+    results_snp_merged = np.concatenate([results_snp,results_snp_2])
+    results_btc_merged = np.concatenate([results_btc,results_btc_2])
+    return results_btc_merged, results_snp_merged
+
+
+@app.cell
+def _(extract_single_ridge_and_plot, np, results_snp_merged, scales):
     snp_fits=[]
-    for _i in range(9):
+    for _i,_ in enumerate(results_snp_merged):
         snp_fits.append(extract_single_ridge_and_plot(
-            mi_map          = np.array(results_snp[_i]["S&P500"]["mi_map_normalized"]),
+            mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
             scales          = scales,
             lags            = np.linspace(-800, 800, 801),
             title           = "S&P500",
@@ -1562,14 +1573,14 @@ def _(extract_single_ridge_and_plot, np, results_snp, scales):
 
 
 @app.cell
-def _(extract_single_ridge_and_plot, np, results_btc, scales):
+def _(extract_single_ridge_and_plot, np, results_btc_merged, scales):
     btc_fits=[]
-    for _i in range(10):
+    for _i,_ in enumerate(results_btc_merged):
         btc_fits.append(extract_single_ridge_and_plot(
-            mi_map          = np.array(results_btc[_i]["BTC"]["mi_map_normalized"]),
+            mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
             scales          = scales,
             lags            = np.linspace(-800, 800, 801),
-            title           = "S&P500",
+            title           = "BTC",
             center_init     = 0.0,
             center_range    = 100.0,
             sigma_init      = 20.0,
@@ -1590,32 +1601,32 @@ def _(btc_fits, np, plt, scales, snp_fits):
             mean = arr.mean(axis=0)           # shape: (n_metrics, n_scales)
             var  = arr.var(axis=0)            # shape: (n_metrics, n_scales)
             return mean, var
-    
+
         snp_mean, snp_var = compute_stats(snp_fits)
         btc_mean, btc_var = compute_stats(btc_fits)
-    
+
         metrics = ["ridge center", "σ_left ", "σ_right", "amplitude"]
-    
+
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         axes = axes.flatten()
-    
+
         for i, metric in enumerate(metrics):
             ax = axes[i]
-    
+
             # SNP
             ax.plot(scales, snp_mean[i], label="SNP mean", color="blue")
             ax.fill_between(scales,
                             snp_mean[i] - np.sqrt(snp_var[i]),
                             snp_mean[i] + np.sqrt(snp_var[i]),
                             color="blue", alpha=0.2)
-    
+
             # BTC
             ax.plot(scales, btc_mean[i], label="BTC mean", color="orange")
             ax.fill_between(scales,
                             btc_mean[i] - np.sqrt(btc_var[i]),
                             btc_mean[i] + np.sqrt(btc_var[i]),
                             color="orange", alpha=0.2)
-    
+
             ax.set_xscale("log")
             ax.set_title(f"{metric} comparison")
             if i == 3:
@@ -1625,7 +1636,7 @@ def _(btc_fits, np, plt, scales, snp_fits):
             ax.set_xlabel('scale s')
             ax.grid(True, alpha=0.3)
             ax.legend()
-    
+
         plt.tight_layout()
         plt.show()
         return snp_mean,snp_var, btc_mean,btc_var
@@ -1663,23 +1674,22 @@ def _(btc_fits, plt, scales, snp_fits):
 
     plt.tight_layout()
     plt.show()
-
     return
 
 
 @app.cell
-def _(np, plt, results_snp):
+def _(np, plt, results_snp_merged):
     def plot_signal_grid():
-        fig, axes = plt.subplots(3, 3, figsize=(12, 10))
+        fig, axes = plt.subplots(4, 5, figsize=(12, 10))
         axes = axes.flatten()
-    
-        for i in range(9):
+
+        for i in range(19):
             ax = axes[i]
-            signal = results_snp[i]["S&P500"]["signal"]
+            signal = results_snp_merged[i]["S&P500"]["signal"]
             ax.plot(0.01 * np.exp(signal))
             ax.set_title(f"S&P500 batch {i}")
             ax.grid(True, alpha=0.3)
-    
+
         plt.tight_layout()
         plt.show()
     plot_signal_grid()
@@ -1687,21 +1697,377 @@ def _(np, plt, results_snp):
 
 
 @app.cell
-def _(np, plt, results_btc):
+def _(np, plt, results_btc_merged):
     def plot_signal_grid_btc():
-        fig, axes = plt.subplots(4, 3, figsize=(12, 10))
+        fig, axes = plt.subplots(5,5, figsize=(12, 10))
         axes = axes.flatten()
-    
-        for i in range(10):
+
+        for i in range(21):
             ax = axes[i]
-            signal = results_btc[i]["BTC"]["signal"]
+            signal = results_btc_merged[i]["BTC"]["signal"]
             ax.plot(np.exp(signal))
             ax.set_title(f"btc batch {i}")
             ax.grid(True, alpha=0.3)
-    
+
         plt.tight_layout()
         plt.show()
     plot_signal_grid_btc()
+    return
+
+
+@app.cell
+def _(np, plt, smooth_mi_map):
+    def plot_Mi_map_publication(mi_map, scales, lags,
+                                   centers=None, sigma_left=None, sigma_right=None,
+                                   success=None, title="", 
+                                   smooth_sigma_scale=0, smooth_sigma_lag=0,
+                                   save_as=None):
+        """
+        Publication‑grade single‑panel ridge fit plot.
+        Springer‑compatible: serif fonts, clean layout, single‑column width.
+        """
+
+        # --- Style ------------------------------------------------------------
+        plt.rcParams.update({
+            "font.family": "serif",
+            "font.size": 9,
+            "axes.labelsize": 9,
+            "axes.titlesize": 9,
+            "xtick.labelsize": 8,
+            "ytick.labelsize": 8,
+            "legend.fontsize": 8,
+            "axes.linewidth": 0.8,
+            "lines.linewidth": 1.0,
+            "figure.dpi": 300,
+            "savefig.dpi": 600,
+        })
+
+        # --- Smooth MI map ----------------------------------------------------
+        sm = smooth_mi_map(mi_map, smooth_sigma_scale, smooth_sigma_lag)
+
+        # --- Prepare figure ---------------------------------------------------
+        fig, ax = plt.subplots(figsize=(3.27, 2.8))  # single‑column width
+
+        pcm = ax.pcolormesh(lags, scales, sm, cmap="viridis", shading="auto")
+        ax.set_yscale("log")
+        ax.set_xlabel("Lag $\\tau$")
+        ax.set_ylabel("Scale $s$")
+        ax.set_title(title)
+
+        if centers is not None and sigma_left is not None and sigma_right is not None and success is not None:
+            # --- Ridge overlay ----------------------------------------------------
+            s_ok  = scales[success]
+            c_ok  = centers[success]
+            sl_ok = sigma_left[success]
+            sr_ok = sigma_right[success]
+
+            ax.plot(c_ok,         s_ok, "w--", lw=1.2, label="center")
+            ax.plot(c_ok - sl_ok, s_ok, color="cyan",   lw=0.9, ls=":", label="$-\\sigma_L$")
+            ax.plot(c_ok + sr_ok, s_ok, color="orange", lw=0.9, ls=":", label="$+\\sigma_R$")
+
+        # --- Colorbar ---------------------------------------------------------
+        cbar = fig.colorbar(pcm, ax=ax, pad=0.02)
+        cbar.set_label("normalized MI")
+
+        ax.legend(frameon=False)
+        fig.tight_layout()
+
+        # --- Save if requested ------------------------------------------------
+        if save_as is not None:
+            fig.savefig(save_as, bbox_inches="tight")
+
+        plt.show()
+    def plot_MI_map_from_results(asset_name,
+                                ridge_results,
+                                results_merged,
+                                scales,
+                                batch_index=0):
+
+        if ridge_results is not None:
+            centers, sl, sr, amp, ok = ridge_results[batch_index]
+
+        # Extract MI map for the chosen asset and batch
+        mi_map = np.array(results_merged[batch_index][asset_name]["mi_map_normalized"])
+        lags   = np.linspace(-800, 800, 801)
+
+        # Produce publication‑grade figure
+        if ridge_results is not None:
+            plot_Mi_map_publication(
+                mi_map=mi_map,
+                scales=scales,
+                lags=lags,
+                centers=centers,
+                sigma_left=sl,
+                sigma_right=sr,
+                success=ok,
+                title=f"{asset_name} — MI Ridge Fit",
+                save_as=f"ridge_fit_{asset_name.lower()}_batch_{batch_index+1}.pdf"
+            )
+        else:
+            plot_Mi_map_publication(
+            mi_map=mi_map,
+            scales=scales,
+            lags=lags,
+            title=f"{asset_name} — MI map",
+            save_as=f"MI_map_{asset_name.lower()}_batch_{batch_index+1}.pdf"
+        )
+
+
+
+    return (plot_MI_map_from_results,)
+
+
+@app.cell
+def _(plot_MI_map_from_results, results_btc_merged, scales):
+    plot_MI_map_from_results(
+        asset_name="BTC",
+        ridge_results=None,#btc_fits,
+        results_merged=results_btc_merged,
+        scales=scales,
+        batch_index=18
+    )
+    return
+
+
+@app.cell
+def _(plot_MI_map_from_results, results_snp_merged, scales):
+    plot_MI_map_from_results(
+        asset_name="S&P500",
+        ridge_results=None,#snp_fits,
+        results_merged=results_snp_merged,
+        scales=scales,
+        batch_index=5
+    )
+    return
+
+
+@app.cell
+def _(btc_fits, plot_MI_map_from_results, results_btc_merged, scales):
+    plot_MI_map_from_results(
+        asset_name="BTC",
+        ridge_results=btc_fits,
+        results_merged=results_btc_merged,
+        scales=scales,
+        batch_index=18
+    )
+    return
+
+
+@app.cell
+def _(np, plot_ridge_fit_publication, results_btc, results_snp, scales):
+    def make_publication_ridge_plots(results_snp, results_btc, scales):
+        lags = np.linspace(-800, 800, 801)
+
+        # S&P500
+        snp = results_snp[0]["S&P500"]
+        plot_ridge_fit_publication(
+            mi_map=snp["mi_map_normalized"],
+            scales=scales,
+            lags=lags,
+            centers=snp["centers"],
+            sigma_left=snp["sigma_left"],
+            sigma_right=snp["sigma_right"],
+            success=snp["success"],
+            title="S&P500 — MI Ridge Fit",
+            save_as="ridge_fit_sp500.pdf"
+        )
+
+        # BTC
+        btc = results_btc[0]["BTC"]
+        plot_ridge_fit_publication(
+            mi_map=btc["mi_map_normalized"],
+            scales=scales,
+            lags=lags,
+            centers=btc["centers"],
+            sigma_left=btc["sigma_left"],
+            sigma_right=btc["sigma_right"],
+            success=btc["success"],
+            title="BTC — MI Ridge Fit",
+            save_as="ridge_fit_btc.pdf"
+        )
+    make_publication_ridge_plots(results_snp, results_btc, scales)
+    return
+
+
+@app.cell
+def _(btc_fits, np, plt, scales, snp_fits):
+    def plot_average_stats_publication(scales, snp_fits, btc_fits):
+        """
+        Publication‑grade comparison of mean ± std envelopes
+        for ridge descriptors across scales.
+        """
+
+
+        # --- Global style (Springer‑compatible) -------------------------------
+        plt.rcParams.update({
+            "font.family": "serif",
+            "font.size": 9,
+            "axes.labelsize": 9,
+            "axes.titlesize": 9,
+            "xtick.labelsize": 8,
+            "ytick.labelsize": 8,
+            "legend.fontsize": 8,
+            "axes.linewidth": 0.8,
+            "lines.linewidth": 1.0,
+            "figure.dpi": 300,
+            "savefig.dpi": 600,
+        })
+
+        # --- Compute statistics ------------------------------------------------
+        def compute_stats(fits):
+            arr = np.array(fits)              # shape: (n_fits, n_metrics, n_scales)
+            mean = arr.mean(axis=0)
+            std  = arr.std(axis=0)
+            return mean, std
+
+        snp_mean, snp_std = compute_stats(snp_fits)
+        btc_mean, btc_std = compute_stats(btc_fits)
+
+        metrics = ["ridge center", "σ_left", "σ_right", "amplitude"]
+
+        # --- Figure layout (double‑column width) -------------------------------
+        fig, axes = plt.subplots(
+            2, 2,
+            figsize=(6.73, 5.2),   # 17.1 cm × 13.2 cm
+            constrained_layout=True
+        )
+        axes = axes.flatten()
+
+        panel_labels = ["(a)", "(b)", "(c)", "(d)"]
+
+        # --- Plot each descriptor ----------------------------------------------
+        for i, metric in enumerate(metrics):
+            ax = axes[i]
+
+            # S&P500
+            ax.plot(scales, snp_mean[i], color="steelblue", label="S&P500")
+            ax.fill_between(
+                scales,
+                snp_mean[i] - snp_std[i],
+                snp_mean[i] + snp_std[i],
+                color="steelblue",
+                alpha=0.20
+            )
+
+            # BTC
+            ax.plot(scales, btc_mean[i], color="darkorange", label="BTC")
+            ax.fill_between(
+                scales,
+                btc_mean[i] - btc_std[i],
+                btc_mean[i] + btc_std[i],
+                color="darkorange",
+                alpha=0.20
+            )
+
+            ax.set_xscale("log")
+            ax.set_xlabel("Scale $s$")
+            ax.set_title(metric)
+
+            if metric == "amplitude":
+                ax.set_ylabel("Amplitude")
+            else:
+                ax.set_ylabel("Lag $\\tau$")
+
+            ax.grid(alpha=0.3)
+            ax.legend(frameon=False)
+
+            # Panel label
+            ax.text(
+                0.02, 0.95, panel_labels[i],
+                transform=ax.transAxes,
+                fontsize=9,
+                va="top", ha="left"
+            )
+        filename = "descriptors_BTC_SnP" # e.g. "ridge_center"
+        fig.savefig(f"{filename}.pdf", bbox_inches="tight")
+        plt.show()
+        return snp_mean, snp_std, btc_mean, btc_std
+    plot_average_stats_publication(scales, snp_fits, btc_fits)
+    return
+
+
+@app.cell
+def _(btc_fits, scales, snp_fits):
+    def plot_average_stats_publication_single(scales, snp_fits, btc_fits):
+        """
+        Publication‑grade single‑panel figures for each descriptor.
+        Springer‑compatible: serif fonts, clean layout, single‑column width.
+        """
+
+        import numpy as np
+        import matplotlib.pyplot as plt
+
+        # --- Global Springer‑style settings -----------------------------------
+        plt.rcParams.update({
+            "font.family": "serif",
+            "font.size": 9,
+            "axes.labelsize": 9,
+            "axes.titlesize": 9,
+            "xtick.labelsize": 8,
+            "ytick.labelsize": 8,
+            "legend.fontsize": 8,
+            "axes.linewidth": 0.8,
+            "lines.linewidth": 1.0,
+            "figure.dpi": 300,
+            "savefig.dpi": 600,
+        })
+
+        # --- Compute statistics ------------------------------------------------
+        def compute_stats(fits):
+            arr = np.array(fits)              # shape: (n_fits, n_metrics, n_scales)
+            mean = arr.mean(axis=0)
+            std  = arr.std(axis=0)
+            return mean, std
+
+        snp_mean, snp_std = compute_stats(snp_fits)
+        btc_mean, btc_std = compute_stats(btc_fits)
+
+        metrics = ["ridge center", "σ_left", "σ_right", "amplitude"]
+
+        # --- Loop over metrics and produce one figure per metric --------------
+        for i, metric in enumerate(metrics):
+
+            fig, ax = plt.subplots(figsize=(3.27, 2.6))  # 8.3 cm × 6.6 cm (single‑column)
+
+            # S&P500
+            ax.plot(scales, snp_mean[i], color="steelblue", label="S&P500")
+            ax.fill_between(
+                scales,
+                snp_mean[i] - snp_std[i],
+                snp_mean[i] + snp_std[i],
+                color="steelblue",
+                alpha=0.20
+            )
+
+            # BTC
+            ax.plot(scales, btc_mean[i], color="darkorange", label="BTC")
+            ax.fill_between(
+                scales,
+                btc_mean[i] - btc_std[i],
+                btc_mean[i] + btc_std[i],
+                color="darkorange",
+                alpha=0.20
+            )
+
+            ax.set_xscale("log")
+            ax.set_xlabel("Scale $s$")
+            ax.set_title(metric)
+
+            if metric == "amplitude":
+                ax.set_ylabel("Amplitude")
+            else:
+                ax.set_ylabel("Lag $\\tau$")
+
+            ax.grid(alpha=0.3)
+            ax.legend(frameon=False)
+
+            fig.tight_layout()
+            filename = metric.replace(" ", "_")  # e.g. "ridge_center"
+            fig.savefig(f"{filename}.pdf", bbox_inches="tight")
+            plt.show()
+
+        return snp_mean, snp_std, btc_mean, btc_std
+    plot_average_stats_publication_single(scales, snp_fits, btc_fits)
     return
 
 
