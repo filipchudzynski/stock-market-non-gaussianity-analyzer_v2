@@ -148,6 +148,32 @@ def _(mo):
 
 
 @app.cell
+def _(np):
+    import plotly.express as px
+    import pandas as pd
+
+    # Generate synthetic data for demonstration
+    np.random.seed(42)
+    data = {
+        'X': np.random.rand(200) * 10,
+        'Y': np.random.rand(200) * 10 + np.random.randn(200) * 2,
+        'Category': np.random.choice(['A', 'B', 'C'], 200)
+    }
+    df = pd.DataFrame(data)
+
+    # Create a figure with multiple scatter plots faceted by 'Category'
+    fig = px.scatter(df, x='X', y='Y', color='Category',
+                     facet_col='Category',
+                     title='Multiple Scatter Plots by Category')
+
+    # Optional: Adjust layout for better visualization
+    fig.update_layout(height=500, showlegend=False)
+
+    fig.show()
+    return (pd,)
+
+
+@app.cell
 def _(
     brownian_motion,
     compare_signals,
@@ -544,6 +570,28 @@ def _(SnP_results_batch, np):
     return
 
 
+@app.cell
+def _(analyse_SandP, np, windows):
+    SnP_results_batch_2 = []
+    for _i,_window in enumerate(windows[1::2]):
+        _result_batch = analyse_SandP(df=_window)
+        np.save(f"mi_map_snp_{(2*_i+1)*30000}-{(2*_i+2)*30000}.npy",_result_batch)
+        SnP_results_batch_2.append(_result_batch)
+    return (SnP_results_batch_2,)
+
+
+@app.cell
+def _(SnP_results_batch_2, np):
+    np.save("mi_map_snp_all_2nd.npy",SnP_results_batch_2)
+    return
+
+
+@app.cell
+def _(np):
+    2*np.arange(0,10)+2
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -633,8 +681,8 @@ def _(df_hist_btc, plt, window_size):
         for i in range(num_windows_btc)
     ]
 
-    for i_btc,w_btc in enumerate(windows_btc[14::10]):
-        print(14+i_btc*10)
+    for i_btc,w_btc in enumerate(windows_btc[10::10]):
+        print(10+i_btc*10)
         plt.plot(w_btc["timestamp"],w_btc["open"])
         plt.show()
     return (windows_btc,)
@@ -653,6 +701,35 @@ def _(analyze_btc, np, windows_btc):
 @app.cell
 def _(BTC_results_batch, np):
     np.save(f"mi_map_btc_all.npy",BTC_results_batch)
+    return
+
+
+@app.cell
+def _(analyze_btc, np, windows_btc):
+    BTC_results_batch_2 = []
+    for _i_btc_batch,_window_btc in enumerate(windows_btc[10::10]):
+        _result_batch_btc = analyze_btc(df=_window_btc)
+        np.save(f"mi_map_btc_{(10+_i_btc_batch*10)*30000}-{(10+_i_btc_batch*10+1)*30000}.npy",_result_batch_btc)
+        BTC_results_batch_2.append(_result_batch_btc)
+    return (BTC_results_batch_2,)
+
+
+@app.cell
+def _(BTC_results_batch_2, np):
+    np.save(f"mi_map_btc_all_2.npy",BTC_results_batch_2)
+    return
+
+
+@app.cell
+def _(np):
+    results_snp=np.load("mi_map_snp_all_2nd.npy",allow_pickle=True)
+    results_btc=np.load("mi_map_btc_all_2.npy",allow_pickle=True)
+    return results_btc, results_snp
+
+
+@app.cell
+def _(results_btc):
+    len(results_btc)
     return
 
 
