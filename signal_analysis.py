@@ -2,7 +2,11 @@ import numpy as np
 import pywt
 import pandas as pd
 from sklearn.feature_selection import mutual_info_regression
+from sklearn.preprocessing import scale as sk_scale
 from scipy.signal import fftconvolve
+
+from scipy.special import digamma
+from sklearn.neighbors import NearestNeighbors
 
 try:
     import multiprocess as mp
@@ -96,6 +100,76 @@ def center_series(series):
     arr = np.asarray(series, dtype=float)
     return arr - np.mean(arr)
 
+
+# ---------------------------------------------------------------------
+# MI computation paths: scipy vs custom using binary search
+# 
+# ---------------------------------------------------------------------
+
+
+
+def compute_MI_binseach(x,y,k=3,random_state=None):
+    def _compute_radius(x, y, k):
+        xy = np.column_stack([x, y])
+        nn = NearestNeighbors(metric="chebyshev", n_neighbors=k)
+        nn.fit(xy)
+        radius = nn.kneighbors()[0]
+        return np.nextafter(radius[:, -1], 0)
+    def _marginal_count_sorted_exact(values, radius):
+        n = len(values)
+        order = np.argsort(values)
+        sorted_vals = values[order]
+        lo = np.searchsorted(sorted_vals, values - radius, side="left")
+        hi = np.searchsorted(sorted_vals, values + radius, side="right")
+    
+        idx = np.clip(lo - 1, 0, n - 1)
+        d = np.abs(sorted_vals[idx] - values)
+        lo = np.where((lo > 0) & (d <= radius), lo - 1, lo)
+    
+        idx = np.clip(lo, 0, n - 1)
+        d = np.abs(sorted_vals[idx] - values)
+        lo = np.where((lo < hi) & (d > radius), lo + 1, lo)
+    
+        idx = np.clip(hi, 0, n - 1)
+        d = np.abs(sorted_vals[idx] - values)
+        hi = np.where((hi < n) & (d <= radius), hi + 1, hi)
+    
+        idx = np.clip(hi - 1, 0, n - 1)
+        d = np.abs(sorted_vals[idx] - values)
+        hi = np.where((hi > lo) & (d > radius), hi - 1, hi)
+    
+        return (hi - lo) - 1.0
+
+    def _mi_from_counts(nx, ny, n_samples, k):
+        return max(0.0, digamma(n_samples) + digamma(k) - np.mean(digamma(nx + 1)) - np.mean(digamma(ny + 1)))
+    
+    if len(x) != len(y):
+        raise Exception("The MI is computed only for signals of equal length")
+
+    rng = np.random.RandomState(random_state)  # sklearn uses legacy RandomState, not default_rng
+    n_samples = len(x)
+
+    x = sk_scale(x.reshape(-1, 1), with_mean=False).ravel()
+    y = sk_scale(y.reshape(-1, 1), with_mean=False).ravel()
+ 
+    x = x + 1e-10 * max(1, np.mean(np.abs(x))) * rng.standard_normal(n_samples)
+    y = y + 1e-10 * max(1, np.mean(np.abs(y))) * rng.standard_normal(n_samples)
+
+
+    radius = _compute_radius(x, y, k)
+    nx_exact = _marginal_count_sorted_exact(x, radius)
+    ny_exact = _marginal_count_sorted_exact(y, radius)
+    return _mi_from_counts(nx_exact,ny_exact,n_samples,k)
+
+def compute_MI(x, y, method="sklearn", k=3,random_state=None):
+
+    if method == "sklearn":
+        return mutual_info_regression(x.reshape(-1, 1), y, discrete_features=False, n_jobs=1,random_state=random_state)[0]
+    elif method == "binsearch":
+        return compute_MI_binseach(x, y, k=k,random_state=random_state)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
 # ---------------------------------------------------------------------
 # 1st PATH: one sklearn call per (scale, dt) pair.
 #
@@ -118,18 +192,14 @@ def _compute_mi_task_legacy(args):
         return 0.0
  
     return float(
-        mutual_info_regression(
-            x.reshape(-1, 1), y,
-            discrete_features=False,
-            n_jobs=1,  # inner parallelism off: outer Pool is already parallel over tasks
-            random_state=random_state,
-        )[0]
+        compute_MI(x, y, method=_mi_method, random_state=random_state)
     )
 
-def _init_worker(w_list, w_ref):
-    global _worker_w_list, _worker_w_ref
+def _init_worker(w_list, w_ref, method):
+    global _worker_w_list, _worker_w_ref, _mi_method
     _worker_w_list = w_list
     _worker_w_ref = w_ref 
+    _mi_method = method
 
 
 def _compute_mi_map_legacy(
@@ -137,7 +207,8 @@ def _compute_mi_map_legacy(
     ref_idx,
     max_time_lag,
     use_parallel,
-    n_jobs
+    n_jobs,
+    method
 ):
     w_ref = log_vol_series[ref_idx]
     n_scales = len(log_vol_series)
@@ -153,7 +224,7 @@ def _compute_mi_map_legacy(
         if n_jobs is None:
             n_jobs = mp.cpu_count()
         # initializer sends log_vol_series/w_ref once per worker, not once per task
-        with mp.Pool(processes=n_jobs, initializer=_init_worker, initargs=(log_vol_series, w_ref)) as pool:
+        with mp.Pool(processes=n_jobs, initializer=_init_worker, initargs=(log_vol_series, w_ref, method)) as pool:
             results = pool.map(_compute_mi_task_legacy, tasks)
     else:
         _init_worker(log_vol_series, w_ref)
@@ -231,6 +302,7 @@ def compute_mutual_information_map(
     use_parallel=False,
     n_jobs=None,
     batched=False,       # "legacy" (original per-(scale,dt)) or "batched" (per-dt, multi-column)
+    method="sklearn"     # "sklearn" (default) or "binsearch" (custom)
 ):
     """Compute the mutual information map between scales and time lags.
  
@@ -242,7 +314,7 @@ def compute_mutual_information_map(
     if batched:
         return _compute_mi_map_batched(log_vol_series, ref_idx, max_time_lag, use_parallel, n_jobs)
     else:
-        return _compute_mi_map_legacy(log_vol_series, ref_idx, max_time_lag, use_parallel, n_jobs)
+        return _compute_mi_map_legacy(log_vol_series, ref_idx, max_time_lag, use_parallel, n_jobs, method)
     
 
 
@@ -257,6 +329,7 @@ def analyze_signal(
     use_parallel=False,
     n_jobs=None,
     batched=False,
+    method="sklearn"
 ):
     """Analyze one signal and return log-volatility and mutual-information results."""
     detail_series, scales = compute_wavelet_details_custom(signal, scales, wavelet=wavelet)
@@ -267,7 +340,8 @@ def analyze_signal(
         max_time_lag=max_time_lag,
         use_parallel=use_parallel,
         n_jobs=n_jobs,
-        batched=batched
+        batched=batched,
+        method=method
     )
 
     return {

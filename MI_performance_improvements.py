@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.5"
-app = marimo.App(width="full")
+app = marimo.App(width="full", auto_download=["html", "ipynb"])
 
 
 @app.cell
@@ -11,8 +11,8 @@ def _():
     return (mo,)
 
 
-@app.cell
-def _():
+app._unparsable_cell(
+    """
     import numpy as np
     import matplotlib.pyplot as plt
     from scipy.signal import fftconvolve
@@ -36,7 +36,7 @@ def _():
         return results
 
     def plot_signals(results):
-        """Plot the original signals (treated as log-price)."""
+        \"\"\"Plot the original signals (treated as log-price).\"\"\"
         fig, axes = plt.subplots(len(results), 1, figsize=(10, 4 * len(results)), sharex=True)
         if len(results) == 1:
             axes = [axes]
@@ -49,7 +49,7 @@ def _():
         plt.show()
 
     def plot_volatility_walks(results, scale_idx=3):
-        """Plot centered log-volatility walks for each signal."""
+        \"\"\"Plot centered log-volatility walks for each signal.\"\"\"
         fig, axes = plt.subplots(len(results), 1, figsize=(10, 4 * len(results)), sharex=True)
         if len(results) == 1:
             axes = [axes]
@@ -58,14 +58,14 @@ def _():
             w_a_centered = w_a - np.mean(w_a)
             v_a = np.cumsum(w_a_centered)
             ax.plot(v_a)
-            ax.set_title(f"{name}: Centered Log-Volatility Walk (Scale {output['scales'][scale_idx]})")
+            ax.set_title(f\"{name}: Centered Log-Volatility Walk (Scale {output['scales'][scale_idx]})\")
             ax.set_ylabel('Walk Value')
         plt.xlabel('Time')
         plt.tight_layout()
         plt.show()
 
     def plot_autocorrelations(results, scale_idx=3, max_lag=500):
-        """Plot autocorrelations of returns and log-volatility."""
+        \"\"\"Plot autocorrelations of returns and log-volatility.\"\"\"
         fig, axes = plt.subplots(len(results), 2, figsize=(12, 4 * len(results)))
         if len(results) == 1:
             axes = axes.reshape(1, -1)
@@ -80,7 +80,7 @@ def _():
             axes[i, 0].set_xlabel('Lag')
             axes[i, 0].set_ylabel('Autocorrelation')
             axes[i, 1].plot(w_ac[:max_lag + 1])
-            axes[i, 1].set_title(f"{name}: Log-Volatility Autocorrelation (Scale {output['scales'][scale_idx]})")
+            axes[i, 1].set_title(f\"{name}: Log-Volatility Autocorrelation (Scale {output['scales'][scale_idx]})\")
             axes[i, 1].set_xlabel('Lag')
             axes[i, 1].set_ylabel('Autocorrelation')
         plt.tight_layout()
@@ -90,7 +90,7 @@ def _():
         fig, axes = plt.subplots(1, len(results), figsize=(6 * len(results), 5), sharey=True)
         if len(results) == 1:
             axes = [axes]
-        for ax, (name, output) in zip(axes, results.items()):
+        for ax, (name, output) in zip(axes, results:
             im = ax.imshow(output['mi_map'], aspect='auto', origin='upper', extent=[-max_time_lag, max_time_lag, output['scales'][-1], output['scales'][0]])
             ax.set_title(name)
             ax.set_xlabel('Time lag')
@@ -121,17 +121,9 @@ def _():
             fig.colorbar(im, ax=ax, label='Mutual Information normalized')
         plt.tight_layout()
         plt.show()
-
-    return (
-        compare_signals,
-        np,
-        plot_autocorrelations,
-        plot_mi_maps,
-        plot_signals,
-        plot_volatility_walks,
-        plt,
-        psi_haar_smooth,
-    )
+    """,
+    name="_"
+)
 
 
 @app.cell(hide_code=True)
@@ -191,7 +183,7 @@ def _(
     plot_volatility_walks,
     psi_haar_smooth,
 ):
-    def analyse_SandP(df,batched):
+    def analyse_SandP(df,batched,method):
         log_price = np.array(df['log_price'].values)
 
         n_samples = 30000
@@ -199,7 +191,7 @@ def _(
         signals = {
             'S&P500': log_price[:n_samples]
         }
-        results = compare_signals(signals, scales=scales, wavelet=psi_haar_smooth, max_level=8, window=50, ref_idx=0, max_time_lag=400, use_parallel=True, n_jobs=8,batched=batched)
+        results = compare_signals(signals, scales=scales, wavelet=psi_haar_smooth, max_level=8, window=50, ref_idx=0, max_time_lag=400, use_parallel=True, n_jobs=8,batched=batched,method=method)
 
         for name, output in results.items():
             print(f"{name}: log_vol_series shape = {output['log_vol_series'].shape}, mi_map shape = {output['mi_map'].shape}")
@@ -216,14 +208,28 @@ def _(
 
 @app.cell
 def _(analyse_SandP, df_snp):
-    results_snp = analyse_SandP(df_snp,batched=True)
+    results_snp = analyse_SandP(df_snp,batched=False,method="binsearch")
     return (results_snp,)
 
 
 @app.cell
-def _(analyse_SandP, df_snp):
-    results_snp_legacy = analyse_SandP(df_snp,batched=False)
+def _(np):
+    #results_snp_legacy = analyse_SandP(df_snp,batched=False)
+    results_snp_legacy=np.load("ksg_optimization_legacy.npy",allow_pickle=True)
     return (results_snp_legacy,)
+
+
+@app.cell
+def _(results_snp_legacy):
+    results_snp_legacy.item()["S&P500"]["mi_map"]
+    return
+
+
+@app.cell
+def _(np, results_snp_legacy):
+    for _i in results_snp_legacy.item()["S&P500"]["log_vol_series"]:
+        print(np.any(np.unique(_i, return_counts=True)[1]>1))
+    return
 
 
 @app.cell
@@ -231,9 +237,15 @@ def _(plot_mi_maps, results_snp, results_snp_legacy):
     results_method_comp = {}
     results_method_comp["S&P-S&P legacy"] = {}
     results_method_comp["S&P-S&P legacy"]["scales"] = results_snp["S&P500"]["scales"]
-    results_method_comp["S&P-S&P legacy"]["mi_map"] = results_snp["S&P500"]["mi_map"] - results_snp_legacy["S&P500"]["mi_map"]
+    # results_method_comp["S&P-S&P legacy"]["mi_map"] = results_snp["S&P500"]["mi_map"] - results_snp_legacy["S&P500"]["mi_map"]
+    results_method_comp["S&P-S&P legacy"]["mi_map"] = results_snp["S&P500"]["mi_map"] - results_snp_legacy.item()["S&P500"]["mi_map"]
+    plot_mi_maps(results_method_comp,800)
+    return (results_method_comp,)
 
-    plot_mi_maps(results_method_comp,400)
+
+@app.cell
+def _(np, results_method_comp):
+    np.average(results_method_comp["S&P-S&P legacy"]["mi_map"])
     return
 
 
@@ -243,6 +255,18 @@ def _(mo):
     the speedup is negligible 26 min 50' vs 27 min 30'
     """)
     return
+
+
+@app.cell
+def _(results_snp, results_snp_legacy):
+    ((results_snp["S&P500"]["mi_map"] - results_snp_legacy["S&P500"]["mi_map"])>0.00001).any() and not ((results_snp["S&P500"]["mi_map"] - results_snp_legacy["S&P500"]["mi_map"])>0.0001).any()
+    return
+
+
+@app.cell
+def _(np):
+    results_snp_legacy=np.load("ksg_optimization_legacy.npy")
+    return (results_snp_legacy,)
 
 
 @app.cell(hide_code=True)
@@ -270,15 +294,39 @@ def _(df_snp, plt):
 
 
 @app.cell
-def _(analyse_SandP, np, windows):
-    SnP_results_batch = []
-    for i,window in enumerate(windows[::2]):
-        if i==0:
-            continue
-        result_batch = analyse_SandP(df=window)
-        np.save(f"mi_map_snp_{2*i*30000}-{(2*i+1)*30000}.npy",result_batch)
-        SnP_results_batch.append(result_batch)
-    return (SnP_results_batch,)
+def _(analyse_SandP, windows):
+    SnP_results_batch_scipy = []
+    for _i,_window in enumerate(windows[::2]):
+        _result_batch = analyse_SandP(df=_window,batched=False,method="sklearn")
+        # np.save(f"mi_map_snp_{2*i*30000}-{(2*i+1)*30000}.npy",_result_batch)
+        SnP_results_batch_scipy.append(_result_batch)
+    return (SnP_results_batch_scipy,)
+
+
+@app.cell
+def _(analyse_SandP, windows):
+    SnP_results_batch_custom = []
+    for _i,_window in enumerate(windows[::2]):
+        _result_batch = analyse_SandP(df=_window,batched=False,method="binsearch")
+        # np.save(f"mi_map_snp_{2*i*30000}-{(2*i+1)*30000}.npy",_result_batch)
+        SnP_results_batch_custom.append(_result_batch)
+    return (SnP_results_batch_custom,)
+
+
+@app.cell
+def _(SnP_results_batch_custom, SnP_results_batch_scipy, plot_mi_maps):
+    for b in zip(SnP_results_batch_scipy,SnP_results_batch_custom):
+        temp_plot = {}
+        temp_plot["S&P500-diff"]={}
+        temp_plot["S&P500-diff"]["scales"] = b[0]["S&P500"]["scales"]
+        temp_plot["S&P500-diff"]["mi_map"] = b[0]["S&P500"]["mi_map"]-b[1]["S&P500"]["mi_map"]
+        plot_mi_maps(temp_plot,800)
+    return
+
+
+@app.cell
+def _():
+    return
 
 
 @app.cell
