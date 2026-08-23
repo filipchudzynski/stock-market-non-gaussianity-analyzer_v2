@@ -240,7 +240,7 @@ def _(np, plt):
             plt.show()
 
 
-    return plot_comparison_with_ridges, plot_raw_mi_map
+    return (plot_raw_mi_map,)
 
 
 @app.cell
@@ -251,21 +251,21 @@ def _(np, results_snp):
 
 
 @app.cell
-def _(np, plot_comparison_with_ridges, results_snp, smooth_mi_map):
-    input_map = results_snp[0]["S&P500"]["mi_map"]
-    scales = results_snp[0]["S&P500"]["scales"]
-    lags = np.linspace(-800, 800, 801)  # or your actual lag array
+def _():
+    # input_map = results_snp[0]["S&P500"]["mi_map"]
+    # scales = results_snp[0]["S&P500"]["scales"]
+    # lags = np.linspace(-800, 800, 801)  # or your actual lag array
 
-    sigmas = [(0,0),(0.8, 1.5), (1.0, 2.0), (1.2, 2.5)]
+    # sigmas = [(0,0),(0.8, 1.5), (1.0, 2.0), (1.2, 2.5)]
 
-    plot_comparison_with_ridges(
-        input_map=input_map,
-        scales=scales,
-        sigmas=sigmas,
-        lags=lags,
-        smooth_fn=smooth_mi_map
-    )
-    return input_map, lags, scales
+    # plot_comparison_with_ridges(
+    #     input_map=input_map,
+    #     scales=scales,
+    #     sigmas=sigmas,
+    #     lags=lags,
+    #     smooth_fn=smooth_mi_map
+    # )
+    return
 
 
 @app.cell
@@ -2111,13 +2111,13 @@ def _(scales):
 
 @app.cell
 def _(np):
-    btc_fits_generalized=np.load("btc_fits_generalized.npy",allow_pickle=True)
-    btc_fits_generalized_gauss=np.load("btc_fits_generalized_gauss.npy",allow_pickle=True)
-    btc_fits_exp_generalized=np.load("btc_fits_generalized_exp.npy",allow_pickle=True)
+    btc_fits_generalized=np.load("btc_fits_generalized_score.npy",allow_pickle=True)
+    btc_fits_generalized_gauss=np.load("btc_fits_generalized_score_gauss.npy",allow_pickle=True)
+    btc_fits_exp_generalized=np.load("btc_fits_generalized_score_exp.npy",allow_pickle=True)
 
-    snp_fits_generalized=np.load("snp_fits_generalized.npy",allow_pickle=True)
-    snp_fits_generalized_gauss=np.load("snp_fits_generalized_gauss.npy",allow_pickle=True)
-    snp_fits_exp_generalized=np.load("snp_fits_generalized_exp.npy",allow_pickle=True)
+    snp_fits_generalized=np.load("snp_fits_generalized_score.npy",allow_pickle=True)
+    snp_fits_generalized_gauss=np.load("snp_fits_generalized_score_gauss.npy",allow_pickle=True)
+    snp_fits_exp_generalized=np.load("snp_fits_generalized_score_exp.npy",allow_pickle=True)
     return (
         btc_fits_exp_generalized,
         btc_fits_generalized,
@@ -2191,7 +2191,7 @@ def _(AIC, BIC, SplitGaussianSpec, compute_logLikelihood, np, plt):
                 if(_batch%5==0 and (_i==0  or _i==5 or _i==15)):
                     plt.plot(_x,y_centered)
                     plt.plot(_x,_fit)
-                    plt.title(f"AIC:{_aic} BIC:{_bic}")
+                    plt.title(f"AIC:{batch[2]["aic"][_i]} BIC:{batch[2]["bic"][_i]}")
                     plt.show()
 
                 logls.append(_logl)
@@ -2232,6 +2232,12 @@ def _(AIC, BIC, SplitGaussianSpec, compute_logLikelihood, np, plt):
 
 
     return compute_aic_bic, compute_average_scores
+
+
+@app.cell
+def _(snp_fits_generalized):
+    snp_fits_generalized[0][2]["bic"]
+    return
 
 
 @app.cell
@@ -2679,7 +2685,6 @@ def _(
     ])
 
     df_delta_aic
-
     return (sp_asym_vs_exp,)
 
 
@@ -2697,7 +2702,7 @@ def _():
 @app.cell
 def _(np, plt):
 
-    def plot_delta_aic_per_scale_boxes(fits_model1, fits_model2, scales, title="ΔAIC per scale (model2 - model1)", meansdon=False):
+    def plot_delta_aic_per_scale_boxes(fits_model1, fits_model2, scales, title="ΔAIC per scale (model2 - model1)", meansdon=False,score="aic"):
         """
         For each scale s:
           - collect ΔAIC_s across all batches
@@ -2706,7 +2711,7 @@ def _(np, plt):
         """
 
         # determine max number of scales
-        max_scales = max(len(batch[2]["aic"]) for batch in fits_model1)
+        max_scales = max(len(batch[2][score]) for batch in fits_model1)
 
         # collect per-scale ΔAIC across batches
         delta_per_scale = []
@@ -2716,8 +2721,8 @@ def _(np, plt):
             deltas = []
 
             for batch1, batch2 in zip(fits_model1, fits_model2):
-                aic1 = batch1[2]["aic"]
-                aic2 = batch2[2]["aic"]
+                aic1 = batch1[2][score]
+                aic2 = batch2[2][score]
 
                 if scale_idx < len(aic1):
                     if not np.isnan(aic1[scale_idx]) and not np.isnan(aic2[scale_idx]):
@@ -2754,7 +2759,7 @@ def _(np, plt):
 
         plt.axhline(0, color="black", lw=1, ls="--")
         plt.xlabel("Scale index")
-        plt.ylabel("ΔAIC (model2 - model1)")
+        plt.ylabel(f"Δ{score.upper()} (model2 - model1)")
         plt.title(title)
         plt.grid(alpha=0.3)
         plt.legend()
@@ -2779,6 +2784,161 @@ def _(
 
     plot_delta_aic_per_scale_boxes(btc_fits_generalized_gauss,btc_fits_generalized,scales,"ΔAIC per scale (assymetric Gauss - Gauss) BTC")
     plot_delta_aic_per_scale_boxes(btc_fits_generalized,btc_fits_exp_generalized,scales,"ΔAIC per scale (assymetric Gauss - assymetric Exp) BTC")
+    return
+
+
+@app.cell
+def _(
+    btc_fits_exp_generalized,
+    btc_fits_generalized,
+    btc_fits_generalized_gauss,
+    plot_delta_aic_per_scale_boxes,
+    scales,
+    snp_fits_exp_generalized,
+    snp_fits_generalized,
+    snp_fits_generalized_gauss,
+):
+    plot_delta_aic_per_scale_boxes(snp_fits_generalized_gauss,snp_fits_generalized,scales,"ΔBIC per scale (assymetric Gauss - Gauss) S&P500",score="bic")
+    plot_delta_aic_per_scale_boxes(snp_fits_generalized,snp_fits_exp_generalized,scales,"ΔBIC per scale (assymetric Gauss - assymetric Exp) S&P500",score="bic")
+
+    plot_delta_aic_per_scale_boxes(btc_fits_generalized_gauss,btc_fits_generalized,scales,"ΔBIC per scale (assymetric Gauss - Gauss) BTC",score="bic")
+    plot_delta_aic_per_scale_boxes(btc_fits_generalized,btc_fits_exp_generalized,scales,"ΔBIC per scale (assymetric Gauss - assymetric Exp) BTC",score="bic")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # descriptor statistical analysis
+    """)
+    return
+
+
+@app.cell
+def _(btc_fits_generalized, snp_fits_generalized):
+    # parameters you want to extract
+    parameters = ["center", "sigma_left", "sigma_right"]
+
+    # initialize pool
+    sample_pool = {
+        "BTC": {param: {} for param in parameters},
+        "S&P":  {param: {} for param in parameters}
+    }
+
+    # helper to fill pool for one dataset
+    def fill_pool(sample_pool, dataset_name, fits_generalized):
+        """
+        dataset_name: "BTC" or "SP"
+        fits_generalized: list of batches
+            fits_generalized[batch][param_tuple_id][param_name][scale]
+        """
+
+        for batch_id, batch in enumerate(fits_generalized):
+            param_tuple = batch[0]   # your parameter dict is at index 0
+
+            for param in parameters:
+                values = param_tuple[param]  # array of values per scale
+
+                for scale_idx, value in enumerate(values):
+                    if scale_idx not in sample_pool[dataset_name][param]:
+                        sample_pool[dataset_name][param][scale_idx] = []
+
+                    sample_pool[dataset_name][param][scale_idx].append(value)
+
+
+    # fill BTC and S&P pools
+    fill_pool(sample_pool, "BTC", btc_fits_generalized)
+    fill_pool(sample_pool, "S&P", snp_fits_generalized)
+
+    return (sample_pool,)
+
+
+@app.cell
+def _():
+
+    # btc_vals = sample_pool["BTC"]["sigma_left"][0]
+    # sp_vals  = sample_pool["S&P"]["sigma_left"][0]
+
+    # _stat,_p = mannwhitneyu(btc_vals, sp_vals, alternative='two-sided')
+    # _res = permutation_test((btc_vals, sp_vals),
+    #                      statistic=lambda x, y: x.mean() - y.mean(),
+    #                      permutation_type='independent')
+
+    # print("Scale 0 — Mann–Whitney p:", _p)
+    # print("Permutation p-value:",_res.pvalue)
+
+    return
+
+
+@app.cell
+def _(np, pd):
+    from scipy.stats import mannwhitneyu
+    from scipy.stats import permutation_test
+
+    def compare_all_parameters_all_scales(sample_pool,scales):
+        """
+        sample_pool["BTC"][param][scale] = list of values
+        sample_pool["S&P"][param][scale] = list of values
+        """
+
+        rows = []
+
+        for param in sample_pool["BTC"].keys():
+            for scale in sample_pool["BTC"][param].keys():
+
+                btc_vals = np.array(sample_pool["BTC"][param][scale])
+                sp_vals  = np.array(sample_pool["S&P"][param][scale])
+
+                # skip empty scales
+                if len(btc_vals) == 0 or len(sp_vals) == 0:
+                    continue
+                btc_vals = btc_vals[~np.isnan(btc_vals)]
+                sp_vals = sp_vals[~np.isnan(sp_vals)]
+
+                # skip empty scales
+                if len(btc_vals) < 5 or len(sp_vals) < 5:
+                    print(f"sample size was smaller than 5 {param,scale}")
+                    continue
+            
+                # Mann–Whitney U
+                _, p_mw = mannwhitneyu(btc_vals, sp_vals, alternative='two-sided')
+
+                # Permutation test
+                perm_res = permutation_test(
+                    (btc_vals, sp_vals),
+                    statistic=lambda x, y: x.mean() - y.mean(),
+                    permutation_type='independent'
+                )
+                p_perm = perm_res.pvalue
+
+                rows.append({
+                    "parameter": param,
+                    "scale": scales[scale],
+                    "sample sizes(BTCvS&P)":(len(btc_vals),len(sp_vals)),
+                    "mann_whitney_p": p_mw,
+                    "permutation_p": p_perm,
+                    "btc_mean": np.mean(btc_vals),
+                    "sp_mean": np.mean(sp_vals),
+                    "btc_std": np.std(btc_vals),
+                    "sp_std": np.std(sp_vals),
+                    "difference_mean": np.mean(btc_vals) - np.mean(sp_vals)
+                })
+
+        return pd.DataFrame(rows)
+
+
+    return (compare_all_parameters_all_scales,)
+
+
+@app.cell
+def _(np):
+    np.array([1,2,3,np.nan])[~np.isnan([1,2,3,np.nan])]
+    return
+
+
+@app.cell
+def _(compare_all_parameters_all_scales, sample_pool, scales):
+    compare_all_parameters_all_scales(sample_pool,scales)
 
 
 
@@ -2786,7 +2946,134 @@ def _(
 
 
 @app.cell
-def _():
+def _(np, plt):
+    from sklearn.metrics import roc_auc_score
+
+    def compute_auc_per_scale(sample_pool, param):
+        """
+        Computes AUC for BTC vs S&P500 for a given parameter across all scales.
+        sample_pool["BTC"][param][scale] = list of values
+        sample_pool["S&P"][param][scale] = list of values
+        """
+
+        auc_dict = {}
+
+        for scale in sample_pool["BTC"][param].keys():
+
+            btc_vals = np.array(sample_pool["BTC"][param][scale])
+            sp_vals  = np.array(sample_pool["S&P"][param][scale])
+
+            # concatenate
+            scores = np.concatenate([btc_vals, sp_vals])
+            labels = np.array([1]*len(btc_vals) + [0]*len(sp_vals))
+
+            # remove NaNs
+            mask = ~np.isnan(scores)
+            scores = scores[mask]
+            labels = labels[mask]
+
+            # if only one class remains or no data
+            if len(scores) == 0 or len(np.unique(labels)) < 2:
+                auc_dict[scale] = np.nan
+                continue
+
+            # compute AUC
+            auc = roc_auc_score(labels, scores)
+            auc_dict[scale] = auc
+
+        return auc_dict
+
+
+    def plot_auc_curve(auc_dict, title):
+        scales = sorted(auc_dict.keys())
+        aucs = [auc_dict[s] for s in scales]
+
+        plt.plot(scales, aucs, marker="o")
+        plt.axhline(0.5, color="black", ls="--")
+        plt.title(title)
+        plt.xlabel("Scale")
+        plt.ylabel("AUC")
+        plt.grid(alpha=0.3)
+        plt.show()
+
+
+    from sklearn.metrics import roc_curve
+
+    def plot_roc_per_scale(sample_pool, param,scale_list=[]):
+        """
+        Plots ROC curves for BTC vs S&P500 for a given parameter across all scales.
+        """
+
+        plt.figure(figsize=(12, 8))
+
+        if not scale_list :
+            scale_list=sample_pool["BTC"][param].keys()
+        for scale in scale_list:
+
+            btc_vals = np.array(sample_pool["BTC"][param][scale])
+            sp_vals  = np.array(sample_pool["S&P"][param][scale])
+
+            scores = np.concatenate([btc_vals, sp_vals])
+            labels = np.array([1]*len(btc_vals) + [0]*len(sp_vals))
+
+            # remove NaNs
+            mask = ~np.isnan(scores)
+            scores = scores[mask]
+            labels = labels[mask]
+
+            # skip scales with insufficient data
+            if len(scores) == 0 or len(np.unique(labels)) < 2:
+                continue
+
+            fpr, tpr, _ = roc_curve(labels, scores)
+
+            plt.plot(fpr, tpr, label=f"Scale {scale}")
+
+        plt.plot([0, 1], [0, 1], 'k--', label="Random (AUC=0.5)")
+        plt.xlabel("False Positive Rate (FPR)")
+        plt.ylabel("True Positive Rate (TPR)")
+        plt.title(f"ROC curves for parameter: {param}")
+        plt.legend()
+        plt.grid(alpha=0.3)
+        plt.show()
+
+
+    return compute_auc_per_scale, plot_auc_curve, plot_roc_per_scale
+
+
+@app.cell
+def _(compute_auc_per_scale, sample_pool):
+    auc_sigma_left  = compute_auc_per_scale(sample_pool, "sigma_left")
+    auc_sigma_right = compute_auc_per_scale(sample_pool, "sigma_right")
+    auc_center      = compute_auc_per_scale(sample_pool, "center")
+
+    return auc_center, auc_sigma_left, auc_sigma_right
+
+
+@app.cell
+def _(auc_center, auc_sigma_left, auc_sigma_right, plot_auc_curve):
+    plot_auc_curve(auc_sigma_left,  "AUC of sigma_left vs scale")
+    plot_auc_curve(auc_sigma_right, "AUC of sigma_right vs scale")
+    plot_auc_curve(auc_center,      "AUC of center vs scale")
+
+    return
+
+
+@app.cell
+def _(plot_roc_per_scale, sample_pool):
+    plot_roc_per_scale(sample_pool, "sigma_left",scale_list=[0,1,2,3,4,5,6,7,8,9])
+    plot_roc_per_scale(sample_pool, "sigma_right",scale_list=[0,1,2,3,4,5,6,7,8,9])
+    plot_roc_per_scale(sample_pool, "center",scale_list=[0,1,2,3,4,5,6,7,8,9])
+
+    return
+
+
+@app.cell
+def _(plot_roc_per_scale, sample_pool):
+    plot_roc_per_scale(sample_pool, "sigma_left",scale_list=[10,11,12,13,14,15,16,17,18,19])
+    plot_roc_per_scale(sample_pool, "sigma_right",scale_list=[10,11,12,13,14,15,16,17,18,19])
+    plot_roc_per_scale(sample_pool, "center",scale_list=[10,11,12,13,14,15,16,17,18,19])
+
     return
 
 
@@ -3231,171 +3518,135 @@ def _(SplitGaussianSpec, extract_single_ridge_lmfit, np, plt, smooth_mi_map):
 
 
 @app.cell
-def _(
-    SplitGaussianSpec,
-    extract_single_ridge_and_plot,
-    np,
-    results_snp_merged,
-    scales,
-):
-    snp_fits_generalized=[]
-    for _i,_ in enumerate(results_snp_merged):
-        snp_fits_generalized.append(extract_single_ridge_and_plot(
-            mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
-            scales          = scales,
-            lags            = np.linspace(-800, 800, 801),
-            title           = "S&P500",
-            center_init     = 0.0,
-            center_range    = 100.0,
-            sigma_init      = 20.0,
-            sigma_max       = 200.0,       # tighter than before
-            amplitude_thresh= 0.05,
-            diagnostic_scale=None,
-            fit_window      = (-300, 300), # ignore flat tails entirely
-            smooth_sigma_lag= 0,smooth_sigma_scale=0,
-            model_spec=SplitGaussianSpec(),   # NEW DEFAULT
-        ))
-    return (snp_fits_generalized,)
+def _():
+    # snp_fits_generalized=[]
+    # for _i,_ in enumerate(results_snp_merged):
+    #     snp_fits_generalized.append(extract_single_ridge_and_plot(
+    #         mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
+    #         scales          = scales,
+    #         lags            = np.linspace(-800, 800, 801),
+    #         title           = "S&P500",
+    #         center_init     = 0.0,
+    #         center_range    = 100.0,
+    #         sigma_init      = 20.0,
+    #         sigma_max       = 200.0,       # tighter than before
+    #         amplitude_thresh= 0.05,
+    #         diagnostic_scale=None,
+    #         fit_window      = (-300, 300), # ignore flat tails entirely
+    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
+    #         model_spec=SplitGaussianSpec(),   # NEW DEFAULT
+    #     ))
+    return
 
 
 @app.cell
-def _(
-    GaussianSpec,
-    extract_single_ridge_and_plot,
-    np,
-    results_snp_merged,
-    scales,
-):
-    snp_fits_generalized_gauss=[]
-    for _i,_ in enumerate(results_snp_merged):
-        snp_fits_generalized_gauss.append(extract_single_ridge_and_plot(
-            mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
-            scales          = scales,
-            lags            = np.linspace(-800, 800, 801),
-            title           = "S&P500",
-            center_init     = 0.0,
-            center_range    = 100.0,
-            sigma_init      = 20.0,
-            sigma_max       = 200.0,       # tighter than before
-            amplitude_thresh= 0.05,
-            diagnostic_scale=None,
-            fit_window      = (-300, 300), # ignore flat tails entirely
-            smooth_sigma_lag= 0,smooth_sigma_scale=0,
-            model_spec=GaussianSpec(),   # NEW DEFAULT
-        ))
-    return (snp_fits_generalized_gauss,)
+def _():
+    # snp_fits_generalized_gauss=[]
+    # for _i,_ in enumerate(results_snp_merged):
+    #     snp_fits_generalized_gauss.append(extract_single_ridge_and_plot(
+    #         mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
+    #         scales          = scales,
+    #         lags            = np.linspace(-800, 800, 801),
+    #         title           = "S&P500",
+    #         center_init     = 0.0,
+    #         center_range    = 100.0,
+    #         sigma_init      = 20.0,
+    #         sigma_max       = 200.0,       # tighter than before
+    #         amplitude_thresh= 0.05,
+    #         diagnostic_scale=None,
+    #         fit_window      = (-300, 300), # ignore flat tails entirely
+    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
+    #         model_spec=GaussianSpec(),   # NEW DEFAULT
+    #     ))
+    return
 
 
 @app.cell
-def _(
-    TwoSidedExpSpec,
-    extract_single_ridge_and_plot,
-    np,
-    results_snp_merged,
-    scales,
-):
-    snp_fits_exp_generalized=[]
-    for _i,_ in enumerate(results_snp_merged):
-        snp_fits_exp_generalized.append(extract_single_ridge_and_plot(
-            mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
-            scales          = scales,
-            lags            = np.linspace(-800, 800, 801),
-            title           = "S&P500",
-            center_init     = 0.0,
-            center_range    = 100.0,
-            sigma_init      = 20.0,
-            sigma_max       = 200.0,       # tighter than before
-            amplitude_thresh= 0.05,
-            diagnostic_scale=None,
-            fit_window      = (-300, 300), # ignore flat tails entirely
-            smooth_sigma_lag= 0,smooth_sigma_scale=0,
-            model_spec=TwoSidedExpSpec(),   # NEW DEFAULT
-        ))
-    return (snp_fits_exp_generalized,)
+def _():
+    # snp_fits_exp_generalized=[]
+    # for _i,_ in enumerate(results_snp_merged):
+    #     snp_fits_exp_generalized.append(extract_single_ridge_and_plot(
+    #         mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
+    #         scales          = scales,
+    #         lags            = np.linspace(-800, 800, 801),
+    #         title           = "S&P500",
+    #         center_init     = 0.0,
+    #         center_range    = 100.0,
+    #         sigma_init      = 20.0,
+    #         sigma_max       = 200.0,       # tighter than before
+    #         amplitude_thresh= 0.05,
+    #         diagnostic_scale=None,
+    #         fit_window      = (-300, 300), # ignore flat tails entirely
+    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
+    #         model_spec=TwoSidedExpSpec(),   # NEW DEFAULT
+    #     ))
+    return
 
 
 @app.cell
-def _(
-    SplitGaussianSpec,
-    extract_single_ridge_and_plot,
-    np,
-    results_btc_merged,
-    scales,
-):
-    btc_fits_generalized=[]
-    for _i,_ in enumerate(results_btc_merged):
-        btc_fits_generalized.append(extract_single_ridge_and_plot(
-            mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
-            scales          = scales,
-            lags            = np.linspace(-800, 800, 801),
-            title           = "BTC",
-            center_init     = 0.0,
-            center_range    = 100.0,
-            sigma_init      = 20.0,
-            sigma_max       = 200.0,       # tighter than before
-            amplitude_thresh= 0.05,
-            diagnostic_scale=None,
-            fit_window      = (-300, 300), # ignore flat tails entirely
-            smooth_sigma_lag= 0,smooth_sigma_scale=0,
-            model_spec=SplitGaussianSpec(),   # NEW DEFAULT
-        ))
-    return (btc_fits_generalized,)
+def _():
+    # btc_fits_generalized=[]
+    # for _i,_ in enumerate(results_btc_merged):
+    #     btc_fits_generalized.append(extract_single_ridge_and_plot(
+    #         mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
+    #         scales          = scales,
+    #         lags            = np.linspace(-800, 800, 801),
+    #         title           = "BTC",
+    #         center_init     = 0.0,
+    #         center_range    = 100.0,
+    #         sigma_init      = 20.0,
+    #         sigma_max       = 200.0,       # tighter than before
+    #         amplitude_thresh= 0.05,
+    #         diagnostic_scale=None,
+    #         fit_window      = (-300, 300), # ignore flat tails entirely
+    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
+    #         model_spec=SplitGaussianSpec(),   # NEW DEFAULT
+    #     ))
+    return
 
 
 @app.cell
-def _(
-    GaussianSpec,
-    extract_single_ridge_and_plot,
-    np,
-    results_btc_merged,
-    scales,
-):
-    btc_fits_generalized_gauss=[]
-    for _i,_ in enumerate(results_btc_merged):
-        btc_fits_generalized_gauss.append(extract_single_ridge_and_plot(
-            mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
-            scales          = scales,
-            lags            = np.linspace(-800, 800, 801),
-            title           = "BTC",
-            center_init     = 0.0,
-            center_range    = 100.0,
-            sigma_init      = 20.0,
-            sigma_max       = 200.0,       # tighter than before
-            amplitude_thresh= 0.05,
-            diagnostic_scale=None,
-            fit_window      = (-300, 300), # ignore flat tails entirely
-            smooth_sigma_lag= 0,smooth_sigma_scale=0,
-            model_spec=GaussianSpec(),   # NEW DEFAULT
-        ))
-    return (btc_fits_generalized_gauss,)
+def _():
+    # btc_fits_generalized_gauss=[]
+    # for _i,_ in enumerate(results_btc_merged):
+    #     btc_fits_generalized_gauss.append(extract_single_ridge_and_plot(
+    #         mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
+    #         scales          = scales,
+    #         lags            = np.linspace(-800, 800, 801),
+    #         title           = "BTC",
+    #         center_init     = 0.0,
+    #         center_range    = 100.0,
+    #         sigma_init      = 20.0,
+    #         sigma_max       = 200.0,       # tighter than before
+    #         amplitude_thresh= 0.05,
+    #         diagnostic_scale=None,
+    #         fit_window      = (-300, 300), # ignore flat tails entirely
+    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
+    #         model_spec=GaussianSpec(),   # NEW DEFAULT
+    #     ))
+    return
 
 
 @app.cell
-def _(
-    TwoSidedExpSpec,
-    extract_single_ridge_and_plot,
-    np,
-    results_btc_merged,
-    scales,
-):
-    btc_fits_exp_generalized=[]
-    for _i,_ in enumerate(results_btc_merged):
-        btc_fits_exp_generalized.append(extract_single_ridge_and_plot(
-            mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
-            scales          = scales,
-            lags            = np.linspace(-800, 800, 801),
-            title           = "BTC",
-            center_init     = 0.0,
-            center_range    = 100.0,
-            sigma_init      = 20.0,
-            sigma_max       = 200.0,       # tighter than before
-            amplitude_thresh= 0.05,
-            diagnostic_scale=None,
-            fit_window      = (-300, 300), # ignore flat tails entirely
-            smooth_sigma_lag= 0,smooth_sigma_scale=0,
-            model_spec=TwoSidedExpSpec(),   # NEW DEFAULT
-        ))
-    return (btc_fits_exp_generalized,)
+def _():
+    # btc_fits_exp_generalized=[]
+    # for _i,_ in enumerate(results_btc_merged):
+    #     btc_fits_exp_generalized.append(extract_single_ridge_and_plot(
+    #         mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
+    #         scales          = scales,
+    #         lags            = np.linspace(-800, 800, 801),
+    #         title           = "BTC",
+    #         center_init     = 0.0,
+    #         center_range    = 100.0,
+    #         sigma_init      = 20.0,
+    #         sigma_max       = 200.0,       # tighter than before
+    #         amplitude_thresh= 0.05,
+    #         diagnostic_scale=None,
+    #         fit_window      = (-300, 300), # ignore flat tails entirely
+    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
+    #         model_spec=TwoSidedExpSpec(),   # NEW DEFAULT
+    #     ))
+    return
 
 
 @app.cell
