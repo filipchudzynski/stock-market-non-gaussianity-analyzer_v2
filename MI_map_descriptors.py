@@ -1247,301 +1247,300 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(np, plt, smooth_mi_map):
-    from lmfit import Model
-    def split_gaussian(x, amplitude, center, sigma_left, sigma_right):
-        sigma = np.where(x < center, sigma_left, sigma_right)
-        return amplitude * np.exp(-0.5 * ((x - center) / sigma) ** 2)
+def _():
+    # from lmfit import Model
+    # def split_gaussian(x, amplitude, center, sigma_left, sigma_right):
+    #     sigma = np.where(x < center, sigma_left, sigma_right)
+    #     return amplitude * np.exp(-0.5 * ((x - center) / sigma) ** 2)
 
-    def fit_single_ridge(row, lags, prev_params=None,
-                         center_init=0.0, center_range=150.0,
-                         sigma_init=30.0, sigma_min=2.0, sigma_max=400.0,
-                         amplitude_thresh=0.05):
-        """
-        Fit a single asymmetric Gaussian to one scale row.
+    # def fit_single_ridge(row, lags, prev_params=None,
+    #                      center_init=0.0, center_range=150.0,
+    #                      sigma_init=30.0, sigma_min=2.0, sigma_max=400.0,
+    #                      amplitude_thresh=0.05):
+    #     """
+    #     Fit a single asymmetric Gaussian to one scale row.
 
-        Key fix: subtract row baseline before fitting so the peak
-        is defined relative to background, not absolute MI level.
-        """
-        model = Model(split_gaussian)
+    #     Key fix: subtract row baseline before fitting so the peak
+    #     is defined relative to background, not absolute MI level.
+    #     """
+    #     model = Model(split_gaussian)
 
-        # ── baseline subtraction ──────────────────────────────────────────
-        # Use a percentile rather than min to be robust to outliers
-        baseline = np.percentile(row, 10)
-        row_centered = row - baseline
-        row_range = row_centered.max()
+    #     # ── baseline subtraction ──────────────────────────────────────────
+    #     # Use a percentile rather than min to be robust to outliers
+    #     baseline = np.percentile(row, 10)
+    #     row_centered = row - baseline
+    #     row_range = row_centered.max()
 
-        # Reject flat rows early — nothing to fit
-        if row_range < amplitude_thresh:
-            return None, False
+    #     # Reject flat rows early — nothing to fit
+    #     if row_range < amplitude_thresh:
+    #         return None, False
 
-        # Normalise to [0,1] for stable fitting, rescale result after
-        row_norm = row_centered / row_range
+    #     # Normalise to [0,1] for stable fitting, rescale result after
+    #     row_norm = row_centered / row_range
 
-        # ── params ───────────────────────────────────────────────────────
-        if prev_params is not None:
-            params = prev_params.copy()
-            params['center'].set(
-                min=params['center'].value - center_range,
-                max=params['center'].value + center_range,
-            )
-            # Reset amplitude to current row's scale
-            params['amplitude'].set(value=1.0, min=amplitude_thresh, max=1.5)
-        else:
-            params = model.make_params(
-                amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
-                center=dict(value=center_init,
-                            min=center_init - center_range,
-                            max=center_init + center_range),
-                sigma_left=dict(value=sigma_init, min=sigma_min, max=sigma_max),
-                sigma_right=dict(value=sigma_init, min=sigma_min, max=sigma_max),
-            )
+    #     # ── params ───────────────────────────────────────────────────────
+    #     if prev_params is not None:
+    #         params = prev_params.copy()
+    #         params['center'].set(
+    #             min=params['center'].value - center_range,
+    #             max=params['center'].value + center_range,
+    #         )
+    #         # Reset amplitude to current row's scale
+    #         params['amplitude'].set(value=1.0, min=amplitude_thresh, max=1.5)
+    #     else:
+    #         params = model.make_params(
+    #             amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
+    #             center=dict(value=center_init,
+    #                         min=center_init - center_range,
+    #                         max=center_init + center_range),
+    #             sigma_left=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+    #             sigma_right=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+    #         )
 
-        try:
-            result = model.fit(row_norm, params, x=lags)
-        except Exception:
-            return None, False
+    #     try:
+    #         result = model.fit(row_norm, params, x=lags)
+    #     except Exception:
+    #         return None, False
 
-        # ── quality checks ────────────────────────────────────────────────
-        p = result.params
-        amp    = p['amplitude'].value
-        sl     = p['sigma_left'].value
-        sr     = p['sigma_right'].value
-        center = p['center'].value
+    #     # ── quality checks ────────────────────────────────────────────────
+    #     p = result.params
+    #     amp    = p['amplitude'].value
+    #     sl     = p['sigma_left'].value
+    #     sr     = p['sigma_right'].value
+    #     center = p['center'].value
 
-        failed = (
-            not result.success
-            or amp < amplitude_thresh           # too weak
-            or sl >= sigma_max * 0.95           # sigma hit bound → degenerate
-            or sr >= sigma_max * 0.95
-            or not (lags[0] < center < lags[-1])# center outside data range
-            or result.redchi > 1.0              # poor fit quality
-        )
+    #     failed = (
+    #         not result.success
+    #         or amp < amplitude_thresh           # too weak
+    #         or sl >= sigma_max * 0.95           # sigma hit bound → degenerate
+    #         or sr >= sigma_max * 0.95
+    #         or not (lags[0] < center < lags[-1])# center outside data range
+    #         or result.redchi > 1.0              # poor fit quality
+    #     )
 
-        if failed:
-            return None, False
+    #     if failed:
+    #         return None, False
 
-        # Store row_range so caller can rescale amplitude if needed
-        result.row_range = row_range
-        result.baseline  = baseline
-        return result, True
-
-
-    def extract_single_ridge_lmfit(mi_map, scales, lags,
-                                    smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
-                                    center_init=0.0, center_range=150.0,
-                                    sigma_init=30.0, sigma_max=400.0,
-                                    amplitude_thresh=0.05,
-                                    fit_window=None):
-        """
-        fit_window : (lag_min, lag_max) or None.
-                     Restrict fitting to a lag sub-window around the expected ridge.
-                     Dramatically helps when large-scale rows are flat outside the peak.
-        """
-        sm = smooth_mi_map(mi_map,
-                           sigma_scale=smooth_sigma_scale,
-                           sigma_lag=smooth_sigma_lag)
-
-        # Optionally restrict to a lag window
-        if fit_window is not None:
-            lo, hi = fit_window
-            mask = (lags >= lo) & (lags <= hi)
-            lags_fit = lags[mask]
-            sm_fit   = sm[:, mask]
-        else:
-            lags_fit = lags
-            sm_fit   = sm
-
-        n_scales    = len(scales)
-        centers     = np.full(n_scales, np.nan)
-        sigma_left  = np.full(n_scales, np.nan)
-        sigma_right = np.full(n_scales, np.nan)
-        amplitudes  = np.full(n_scales, np.nan)
-        success     = np.zeros(n_scales, dtype=bool)
-
-        prev_params  = None
-        fail_streak  = 0
-        MAX_FAILS    = 5   # reset warm-start after this many consecutive failures
-
-        # coarse → fine
-        for i in range(n_scales - 1, -1, -1):
-            row = sm_fit[i]
-
-            result, ok = fit_single_ridge(
-                row, lags_fit,
-                prev_params=prev_params,
-                center_init=center_init,
-                center_range=center_range,
-                sigma_init=sigma_init,
-                sigma_max=sigma_max,
-                amplitude_thresh=amplitude_thresh,
-            )
-
-            if ok:
-                p = result.params
-                centers[i]     = p['center'].value
-                sigma_left[i]  = p['sigma_left'].value
-                sigma_right[i] = p['sigma_right'].value
-                amplitudes[i]  = p['amplitude'].value * result.row_range
-                success[i]     = True
-                prev_params    = result.params
-                fail_streak    = 0
-            else:
-                fail_streak += 1
-                if fail_streak >= MAX_FAILS:
-                    prev_params = None   # full reset — don't keep dragging a bad estimate
-                    fail_streak = 0
-
-        return centers, sigma_left, sigma_right, amplitudes, success
-
-    def plot_fit_at_scale(ax, sm, lags, scales, centers, sigma_left, sigma_right, success,
-                          target_scale=100.0):
-        """
-        On ax: scatter of raw smoothed row + fitted split-Gaussian overlay at the
-        scale closest to target_scale.
-        """
-        # find closest scale index
-        i = np.argmin(np.abs(scales - target_scale))
-        actual_scale = scales[i]
-        row = sm[i]
-
-        # baseline-subtract same way as during fitting
-        baseline = np.percentile(row, 10)
-        row_display = row - baseline
-
-        ax.scatter(lags, row_display, s=6, color='steelblue', alpha=0.6, label='data (baseline sub.)')
-
-        if success[i]:
-            # reconstruct fitted curve
-            fitted = split_gaussian(lags,
-                                    amplitude=(row_display.max()),  # rescale to data
-                                    center=centers[i],
-                                    sigma_left=sigma_left[i],
-                                    sigma_right=sigma_right[i])
-            ax.plot(lags, fitted, 'r-', lw=1.8, label='fit')
-
-            # mark center and sigmas
-            ax.axvline(centers[i],                  color='white',  lw=1.0, ls='--')
-            ax.axvline(centers[i] - sigma_left[i],  color='cyan',   lw=0.8, ls=':')
-            ax.axvline(centers[i] + sigma_right[i], color='orange', lw=0.8, ls=':')
-
-            ax.set_title(f"Fit at s={actual_scale:.0f}  "
-                         f"μ={centers[i]:.1f}  "
-                         f"σL={sigma_left[i]:.1f}  σR={sigma_right[i]:.1f}")
-        else:
-            ax.set_title(f"Fit at s={actual_scale:.0f} — FAILED")
-
-        ax.set_xlabel('Lag τ')
-        ax.set_ylabel('MI (baseline sub.)')
-        ax.legend(fontsize=8)
-        ax.set_facecolor('#1a1a2e')
+    #     # Store row_range so caller can rescale amplitude if needed
+    #     result.row_range = row_range
+    #     result.baseline  = baseline
+    #     return result, True
 
 
-    def plot_single_ridge_lmfit(mi_map, scales, lags,
-                                 centers, sigma_left, sigma_right,
-                                 amplitudes, success, title="",
-                                 smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
-                                 diagnostic_scale=100.0):
-        sm = smooth_mi_map(mi_map, smooth_sigma_scale, smooth_sigma_lag)
+    # def extract_single_ridge_lmfit(mi_map, scales, lags,
+    #                                 smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+    #                                 center_init=0.0, center_range=150.0,
+    #                                 sigma_init=30.0, sigma_max=400.0,
+    #                                 amplitude_thresh=0.05,
+    #                                 fit_window=None):
+    #     """
+    #     fit_window : (lag_min, lag_max) or None.
+    #                  Restrict fitting to a lag sub-window around the expected ridge.
+    #                  Dramatically helps when large-scale rows are flat outside the peak.
+    #     """
+    #     sm = smooth_mi_map(mi_map,
+    #                        sigma_scale=smooth_sigma_scale,
+    #                        sigma_lag=smooth_sigma_lag)
 
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10),
-                                 gridspec_kw={'width_ratios': [3, 1],
-                                              'height_ratios': [2, 1]})
+    #     # Optionally restrict to a lag window
+    #     if fit_window is not None:
+    #         lo, hi = fit_window
+    #         mask = (lags >= lo) & (lags <= hi)
+    #         lags_fit = lags[mask]
+    #         sm_fit   = sm[:, mask]
+    #     else:
+    #         lags_fit = lags
+    #         sm_fit   = sm
 
-        # ── top-left: heatmap ─────────────────────────────────────────────
-        ax = axes[0, 0]
-        pcm = ax.pcolormesh(lags, scales, sm, cmap='viridis', shading='auto')
-        ax.set_yscale('log')
-        ax.set_xlabel('Lag τ')
-        ax.set_ylabel('Scale s')
-        ax.set_title(f"{title} — asymmetric ridge (lmfit)")
-        plt.colorbar(pcm, ax=ax, label='MI')
+    #     n_scales    = len(scales)
+    #     centers     = np.full(n_scales, np.nan)
+    #     sigma_left  = np.full(n_scales, np.nan)
+    #     sigma_right = np.full(n_scales, np.nan)
+    #     amplitudes  = np.full(n_scales, np.nan)
+    #     success     = np.zeros(n_scales, dtype=bool)
 
-        s_ok  = scales[success]
-        c_ok  = centers[success]
-        sl_ok = sigma_left[success]
-        sr_ok = sigma_right[success]
+    #     prev_params  = None
+    #     fail_streak  = 0
+    #     MAX_FAILS    = 5   # reset warm-start after this many consecutive failures
 
-        ax.plot(c_ok,         s_ok, 'w--',                lw=1.5, label='center')
-        ax.plot(c_ok - sl_ok, s_ok, color='cyan',  lw=1, ls=':', label='−σ_left')
-        ax.plot(c_ok + sr_ok, s_ok, color='orange', lw=1, ls=':', label='+σ_right')
-        if diagnostic_scale is not None:
-            # mark the diagnostic scale with a horizontal line
-            ax.axhline(diagnostic_scale, color='red', lw=0.8, ls='--', alpha=0.6)
-        ax.legend(fontsize=8)
+    #     # coarse → fine
+    #     for i in range(n_scales - 1, -1, -1):
+    #         row = sm_fit[i]
 
-        s_fail = scales[~success]
-        if len(s_fail):
-            ax.scatter(np.zeros(len(s_fail)), s_fail, c='red', s=4, zorder=5)
+    #         result, ok = fit_single_ridge(
+    #             row, lags_fit,
+    #             prev_params=prev_params,
+    #             center_init=center_init,
+    #             center_range=center_range,
+    #             sigma_init=sigma_init,
+    #             sigma_max=sigma_max,
+    #             amplitude_thresh=amplitude_thresh,
+    #         )
 
-        # ── top-right: asymmetry ratio ────────────────────────────────────
-        ax2 = axes[0, 1]
-        ratio = sr_ok / sl_ok
-        ax2.plot(ratio, s_ok, 'k-o', ms=2)
-        ax2.axvline(1.0, color='gray', lw=0.8, ls='--')
-        ax2.set_xscale('log')
-        ax2.set_yscale('log')
-        ax2.set_xlabel('σ_right / σ_left')
-        ax2.set_ylabel('Scale s')
-        ax2.set_title('Asymmetry ratio')
+    #         if ok:
+    #             p = result.params
+    #             centers[i]     = p['center'].value
+    #             sigma_left[i]  = p['sigma_left'].value
+    #             sigma_right[i] = p['sigma_right'].value
+    #             amplitudes[i]  = p['amplitude'].value * result.row_range
+    #             success[i]     = True
+    #             prev_params    = result.params
+    #             fail_streak    = 0
+    #         else:
+    #             fail_streak += 1
+    #             if fail_streak >= MAX_FAILS:
+    #                 prev_params = None   # full reset — don't keep dragging a bad estimate
+    #                 fail_streak = 0
 
-        # ── bottom-left: single scale fit diagnostic ──────────────────────
-        if diagnostic_scale is not None:
-            ax3 = axes[1, 0]
-            ax3.set_facecolor('#1a1a2e')
-            plot_fit_at_scale(ax3, sm, lags, scales,
-                              centers, sigma_left, sigma_right, success,
-                              target_scale=diagnostic_scale)
-        else:
-            axes[1, 0].axis('off')
+    #     return centers, sigma_left, sigma_right, amplitudes, success
 
-        # ── bottom-right: unused — can show residuals or leave blank ──────
-        axes[1, 1].axis('off')
+    # def plot_fit_at_scale(ax, sm, lags, scales, centers, sigma_left, sigma_right, success,
+    #                       target_scale=100.0):
+    #     """
+    #     On ax: scatter of raw smoothed row + fitted split-Gaussian overlay at the
+    #     scale closest to target_scale.
+    #     """
+    #     # find closest scale index
+    #     i = np.argmin(np.abs(scales - target_scale))
+    #     actual_scale = scales[i]
+    #     row = sm[i]
 
-        plt.suptitle(title, fontsize=12, y=1.01)
-        plt.tight_layout()
-        plt.show()
+    #     # baseline-subtract same way as during fitting
+    #     baseline = np.percentile(row, 10)
+    #     row_display = row - baseline
+
+    #     ax.scatter(lags, row_display, s=6, color='steelblue', alpha=0.6, label='data (baseline sub.)')
+
+    #     if success[i]:
+    #         # reconstruct fitted curve
+    #         fitted = split_gaussian(lags,
+    #                                 amplitude=(row_display.max()),  # rescale to data
+    #                                 center=centers[i],
+    #                                 sigma_left=sigma_left[i],
+    #                                 sigma_right=sigma_right[i])
+    #         ax.plot(lags, fitted, 'r-', lw=1.8, label='fit')
+
+    #         # mark center and sigmas
+    #         ax.axvline(centers[i],                  color='white',  lw=1.0, ls='--')
+    #         ax.axvline(centers[i] - sigma_left[i],  color='cyan',   lw=0.8, ls=':')
+    #         ax.axvline(centers[i] + sigma_right[i], color='orange', lw=0.8, ls=':')
+
+    #         ax.set_title(f"Fit at s={actual_scale:.0f}  "
+    #                      f"μ={centers[i]:.1f}  "
+    #                      f"σL={sigma_left[i]:.1f}  σR={sigma_right[i]:.1f}")
+    #     else:
+    #         ax.set_title(f"Fit at s={actual_scale:.0f} — FAILED")
+
+    #     ax.set_xlabel('Lag τ')
+    #     ax.set_ylabel('MI (baseline sub.)')
+    #     ax.legend(fontsize=8)
+    #     ax.set_facecolor('#1a1a2e')
 
 
-    # ── entry point ────────────────────────────────────────────────────────────────
+    # def plot_single_ridge_lmfit(mi_map, scales, lags,
+    #                              centers, sigma_left, sigma_right,
+    #                              amplitudes, success, title="",
+    #                              smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+    #                              diagnostic_scale=100.0):
+    #     sm = smooth_mi_map(mi_map, smooth_sigma_scale, smooth_sigma_lag)
 
-    def extract_single_ridge_and_plot(
-            mi_map=None, scales=None, lags=None,
-            title="",
-            center_init=0.0, center_range=150.0,
-            sigma_init=30.0, sigma_max=200.0,
-            amplitude_thresh=0.05,
-            smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
-            diagnostic_scale=100.0,
-            fit_window=None,      # e.g. (-200, 200) to restrict lag range
-    ):
-        mi_map = np.array(mi_map)
+    #     fig, axes = plt.subplots(2, 2, figsize=(14, 10),
+    #                              gridspec_kw={'width_ratios': [3, 1],
+    #                                           'height_ratios': [2, 1]})
 
-        centers, sl, sr, amp, ok = extract_single_ridge_lmfit(
-            mi_map, scales, lags,
-            smooth_sigma_scale=smooth_sigma_scale,
-            smooth_sigma_lag=smooth_sigma_lag,
-            center_init=center_init,
-            center_range=center_range,
-            sigma_init=sigma_init,
-            sigma_max=sigma_max,
-            amplitude_thresh=amplitude_thresh,
-            fit_window=fit_window,
-        )
+    #     # ── top-left: heatmap ─────────────────────────────────────────────
+    #     ax = axes[0, 0]
+    #     pcm = ax.pcolormesh(lags, scales, sm, cmap='viridis', shading='auto')
+    #     ax.set_yscale('log')
+    #     ax.set_xlabel('Lag τ')
+    #     ax.set_ylabel('Scale s')
+    #     ax.set_title(f"{title} — asymmetric ridge (lmfit)")
+    #     plt.colorbar(pcm, ax=ax, label='MI')
 
-        plot_single_ridge_lmfit(
-            mi_map, scales, lags,
-            centers, sl, sr, amp, ok,
-            title=title,
-            smooth_sigma_scale=smooth_sigma_scale,
-            smooth_sigma_lag=smooth_sigma_lag,
-            diagnostic_scale=diagnostic_scale
-        )
+    #     s_ok  = scales[success]
+    #     c_ok  = centers[success]
+    #     sl_ok = sigma_left[success]
+    #     sr_ok = sigma_right[success]
 
-        print(f"Successful fits: {ok.sum()} / {len(ok)}")
-        return centers, sl, sr, amp, ok
+    #     ax.plot(c_ok,         s_ok, 'w--',                lw=1.5, label='center')
+    #     ax.plot(c_ok - sl_ok, s_ok, color='cyan',  lw=1, ls=':', label='−σ_left')
+    #     ax.plot(c_ok + sr_ok, s_ok, color='orange', lw=1, ls=':', label='+σ_right')
+    #     if diagnostic_scale is not None:
+    #         # mark the diagnostic scale with a horizontal line
+    #         ax.axhline(diagnostic_scale, color='red', lw=0.8, ls='--', alpha=0.6)
+    #     ax.legend(fontsize=8)
 
-    return Model, extract_single_ridge_and_plot, extract_single_ridge_lmfit
+    #     s_fail = scales[~success]
+    #     if len(s_fail):
+    #         ax.scatter(np.zeros(len(s_fail)), s_fail, c='red', s=4, zorder=5)
+
+    #     # ── top-right: asymmetry ratio ────────────────────────────────────
+    #     ax2 = axes[0, 1]
+    #     ratio = sr_ok / sl_ok
+    #     ax2.plot(ratio, s_ok, 'k-o', ms=2)
+    #     ax2.axvline(1.0, color='gray', lw=0.8, ls='--')
+    #     ax2.set_xscale('log')
+    #     ax2.set_yscale('log')
+    #     ax2.set_xlabel('σ_right / σ_left')
+    #     ax2.set_ylabel('Scale s')
+    #     ax2.set_title('Asymmetry ratio')
+
+    #     # ── bottom-left: single scale fit diagnostic ──────────────────────
+    #     if diagnostic_scale is not None:
+    #         ax3 = axes[1, 0]
+    #         ax3.set_facecolor('#1a1a2e')
+    #         plot_fit_at_scale(ax3, sm, lags, scales,
+    #                           centers, sigma_left, sigma_right, success,
+    #                           target_scale=diagnostic_scale)
+    #     else:
+    #         axes[1, 0].axis('off')
+
+    #     # ── bottom-right: unused — can show residuals or leave blank ──────
+    #     axes[1, 1].axis('off')
+
+    #     plt.suptitle(title, fontsize=12, y=1.01)
+    #     plt.tight_layout()
+    #     plt.show()
+
+
+    # # ── entry point ────────────────────────────────────────────────────────────────
+
+    # def extract_single_ridge_and_plot(
+    #         mi_map=None, scales=None, lags=None,
+    #         title="",
+    #         center_init=0.0, center_range=150.0,
+    #         sigma_init=30.0, sigma_max=200.0,
+    #         amplitude_thresh=0.05,
+    #         smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+    #         diagnostic_scale=100.0,
+    #         fit_window=None,      # e.g. (-200, 200) to restrict lag range
+    # ):
+    #     mi_map = np.array(mi_map)
+
+    #     centers, sl, sr, amp, ok = extract_single_ridge_lmfit(
+    #         mi_map, scales, lags,
+    #         smooth_sigma_scale=smooth_sigma_scale,
+    #         smooth_sigma_lag=smooth_sigma_lag,
+    #         center_init=center_init,
+    #         center_range=center_range,
+    #         sigma_init=sigma_init,
+    #         sigma_max=sigma_max,
+    #         amplitude_thresh=amplitude_thresh,
+    #         fit_window=fit_window,
+    #     )
+
+    #     plot_single_ridge_lmfit(
+    #         mi_map, scales, lags,
+    #         centers, sl, sr, amp, ok,
+    #         title=title,
+    #         smooth_sigma_scale=smooth_sigma_scale,
+    #         smooth_sigma_lag=smooth_sigma_lag,
+    #         diagnostic_scale=diagnostic_scale
+    #     )
+
+    #     print(f"Successful fits: {ok.sum()} / {len(ok)}")
+    #     return centers, sl, sr, amp, ok
+    return
 
 
 @app.cell
@@ -2143,7 +2142,7 @@ def _(AIC, BIC, SplitGaussianSpec, compute_logLikelihood, np, plt):
             # Detect actual structure
             # batch = (param_dict, success_array)
             # ───────────────────────────────────────────────
-            if (isinstance(batch, tuple) or isinstance(batch,type(np.array([])))) and len(batch) == 2:
+            if (isinstance(batch, tuple) or isinstance(batch,type(np.array([])))) and len(batch) == 3:
                 param_arrays = batch[0]
                 success = batch[1]
             elif isinstance(batch, dict):
@@ -2218,8 +2217,8 @@ def _(AIC, BIC, SplitGaussianSpec, compute_logLikelihood, np, plt):
         bics = []
 
         for batch in fits_with_score:
-            aics.extend(batch["aic"])
-            bics.extend(batch["bic"])
+            aics.extend(batch[2]["aic"])
+            bics.extend(batch[2]["bic"])
 
         aics_nnan = np.nan_to_num(aics)
         bics_nnan = np.nan_to_num(bics)
@@ -2243,7 +2242,7 @@ def _(
     snp_fits_generalized,
 ):
     snp_fits_with_score=compute_aic_bic(snp_fits_generalized,results_snp_merged,asset_type="S&P500",model_spec=SplitGaussianSpec())
-    return (snp_fits_with_score,)
+    return
 
 
 @app.cell
@@ -2254,7 +2253,7 @@ def _(
     snp_fits_generalized_gauss,
 ):
     snp_fits_gauss_with_score=compute_aic_bic(snp_fits_generalized_gauss,results_snp_merged,asset_type="S&P500",model_spec=GaussianSpec())
-    return (snp_fits_gauss_with_score,)
+    return
 
 
 @app.cell
@@ -2265,7 +2264,7 @@ def _(
     snp_fits_exp_generalized,
 ):
     snp_fits_exp_with_score=compute_aic_bic(snp_fits_exp_generalized,results_snp_merged,asset_type="S&P500",model_spec=TwoSidedExpSpec())
-    return (snp_fits_exp_with_score,)
+    return
 
 
 @app.cell
@@ -2276,7 +2275,7 @@ def _(
     results_btc_merged,
 ):
     btc_fits_with_score=compute_aic_bic(btc_fits_generalized,results_btc_merged,asset_type="BTC",model_spec=SplitGaussianSpec())
-    return (btc_fits_with_score,)
+    return
 
 
 @app.cell
@@ -2287,7 +2286,7 @@ def _(
     results_btc_merged,
 ):
     btc_fits_gauss_with_score=compute_aic_bic(btc_fits_generalized_gauss,results_btc_merged,asset_type="BTC",model_spec=GaussianSpec())
-    return (btc_fits_gauss_with_score,)
+    return
 
 
 @app.cell
@@ -2298,31 +2297,31 @@ def _(
     results_btc_merged,
 ):
     btc_fits_exp_with_score=compute_aic_bic(btc_fits_exp_generalized,results_btc_merged,asset_type="BTC",model_spec=TwoSidedExpSpec())
-    return (btc_fits_exp_with_score,)
+    return
 
 
 @app.cell
 def _(
-    btc_fits_exp_with_score,
-    btc_fits_gauss_with_score,
-    btc_fits_with_score,
+    btc_fits_exp_generalized,
+    btc_fits_generalized,
+    btc_fits_generalized_gauss,
     compute_average_scores,
-    snp_fits_exp_with_score,
-    snp_fits_gauss_with_score,
-    snp_fits_with_score,
+    snp_fits_exp_generalized,
+    snp_fits_generalized,
+    snp_fits_generalized_gauss,
 ):
     import pandas as pd
 
     # results from your compute_average_scores(...)
     # each is: (sum_aic, avg_aic, sum_bic, avg_bic)
 
-    sp_asym_sum_aic, sp_asym_avg_aic, sp_asym_sum_bic, sp_asym_avg_bic = compute_average_scores(snp_fits_with_score)
-    sp_sym_sum_aic,  sp_sym_avg_aic,  sp_sym_sum_bic,  sp_sym_avg_bic  = compute_average_scores(snp_fits_gauss_with_score)
-    sp_exp_sum_aic,  sp_exp_avg_aic,  sp_exp_sum_bic,  sp_exp_avg_bic  = compute_average_scores(snp_fits_exp_with_score)
+    sp_asym_sum_aic, sp_asym_avg_aic, sp_asym_sum_bic, sp_asym_avg_bic = compute_average_scores(snp_fits_generalized)
+    sp_sym_sum_aic,  sp_sym_avg_aic,  sp_sym_sum_bic,  sp_sym_avg_bic  = compute_average_scores(snp_fits_generalized_gauss)
+    sp_exp_sum_aic,  sp_exp_avg_aic,  sp_exp_sum_bic,  sp_exp_avg_bic  = compute_average_scores(snp_fits_exp_generalized)
 
-    btc_asym_sum_aic, btc_asym_avg_aic, btc_asym_sum_bic, btc_asym_avg_bic = compute_average_scores(btc_fits_with_score)
-    btc_sym_sum_aic,  btc_sym_avg_aic,  btc_sym_sum_bic,  btc_sym_avg_bic = compute_average_scores(btc_fits_gauss_with_score)
-    btc_exp_sum_aic,  btc_exp_avg_aic,  btc_exp_sum_bic,  btc_exp_avg_bic = compute_average_scores(btc_fits_exp_with_score)
+    btc_asym_sum_aic, btc_asym_avg_aic, btc_asym_sum_bic, btc_asym_avg_bic = compute_average_scores(btc_fits_generalized)
+    btc_sym_sum_aic,  btc_sym_avg_aic,  btc_sym_sum_bic,  btc_sym_avg_bic =compute_average_scores(btc_fits_generalized_gauss)
+    btc_exp_sum_aic,  btc_exp_avg_aic,  btc_exp_sum_bic,  btc_exp_avg_bic = compute_average_scores(btc_fits_exp_generalized)
 
 
     df = pd.DataFrame([
@@ -2377,7 +2376,7 @@ def _(
     ])
 
     df
-    return
+    return (pd,)
 
 
 @app.cell
@@ -2404,7 +2403,7 @@ def _(plt):
         for label, fits in models_dict.items():
             aic_seq = []
             for batch in fits:
-                aic_seq.extend(batch[score_type])
+                aic_seq.extend(batch[2][score_type])
             plt.plot(aic_seq, label=f"{label} {score_type.upper()}")
 
         # Build x-axis tick positions for batch boundaries
@@ -2413,7 +2412,7 @@ def _(plt):
 
         offset = 0
         for batch_idx, fits in enumerate(models_dict[list(models_dict.keys())[0]]):
-            n_scales = len(fits["aic"])
+            n_scales = len(fits[2]["aic"])
             # first scale of batch
             tick_positions.append(offset)
             tick_labels.append(f"B{batch_idx}-S0")
@@ -2437,14 +2436,14 @@ def _(plt):
 @app.cell
 def _(
     plot_aic_bic_compare_with_batch_labels,
-    snp_fits_exp_with_score,
-    snp_fits_gauss_with_score,
-    snp_fits_with_score,
+    snp_fits_exp_generalized,
+    snp_fits_generalized,
+    snp_fits_generalized_gauss,
 ):
     _snp_models_dict = {
-        "S&P asym": snp_fits_with_score,
-        "S&P sym": snp_fits_gauss_with_score,
-        "S&P exp": snp_fits_exp_with_score
+        "S&P asym": snp_fits_generalized,
+        "S&P sym": snp_fits_generalized_gauss,
+        "S&P exp": snp_fits_exp_generalized
     }
     plot_aic_bic_compare_with_batch_labels(_snp_models_dict)
     return
@@ -2453,14 +2452,14 @@ def _(
 @app.cell
 def _(
     plot_aic_bic_compare_with_batch_labels,
-    snp_fits_exp_with_score,
-    snp_fits_gauss_with_score,
-    snp_fits_with_score,
+    snp_fits_exp_generalized,
+    snp_fits_generalized,
+    snp_fits_generalized_gauss,
 ):
     _snp_models_dict = {
-        "S&P asym": snp_fits_with_score,
-        "S&P sym": snp_fits_gauss_with_score,
-        "S&P exp": snp_fits_exp_with_score
+        "S&P asym": snp_fits_generalized,
+        "S&P sym": snp_fits_generalized_gauss,
+        "S&P exp": snp_fits_exp_generalized
     }
     plot_aic_bic_compare_with_batch_labels(_snp_models_dict,"bic")
     return
@@ -2468,15 +2467,15 @@ def _(
 
 @app.cell
 def _(
-    btc_fits_exp_with_score,
-    btc_fits_gauss_with_score,
-    btc_fits_with_score,
+    btc_fits_exp_generalized,
+    btc_fits_generalized,
+    btc_fits_generalized_gauss,
     plot_aic_bic_compare_with_batch_labels,
 ):
     _btc_models_dict = {
-        "BTC asym": btc_fits_with_score,
-        "BTC sym": btc_fits_gauss_with_score,
-        "BTC exp": btc_fits_exp_with_score
+        "BTC asym": btc_fits_generalized,
+        "BTC sym": btc_fits_generalized_gauss,
+        "BTC exp": btc_fits_exp_generalized
     }
     plot_aic_bic_compare_with_batch_labels(_btc_models_dict)
     return
@@ -2484,15 +2483,15 @@ def _(
 
 @app.cell
 def _(
-    btc_fits_exp_with_score,
-    btc_fits_gauss_with_score,
-    btc_fits_with_score,
+    btc_fits_exp_generalized,
+    btc_fits_generalized,
+    btc_fits_generalized_gauss,
     plot_aic_bic_compare_with_batch_labels,
 ):
     _btc_models_dict = {
-        "BTC asym": btc_fits_with_score,
-        "BTC sym": btc_fits_gauss_with_score,
-        "BTC exp": btc_fits_exp_with_score
+        "BTC asym": btc_fits_generalized,
+        "BTC sym": btc_fits_generalized_gauss,
+        "BTC exp": btc_fits_exp_generalized
     }
     plot_aic_bic_compare_with_batch_labels(_btc_models_dict,"bic")
     return
@@ -2500,11 +2499,13 @@ def _(
 
 @app.cell
 def _(np):
+
     def compute_delta_scores(fits_model1, fits_model2):
         """
         Computes:
         1) global ΔAIC = avg(AIC_model2) - avg(AIC_model1)
         2) per-row ΔAIC = AIC_model2[i] - AIC_model1[i]
+        3) per-scale ΔAIC aggregated across batches
         Same for BIC.
         """
 
@@ -2515,10 +2516,10 @@ def _(np):
 
         # collect all AIC/BIC values across batches/scales
         for batch1, batch2 in zip(fits_model1, fits_model2):
-            aic1_all.extend(batch1["aic"])
-            aic2_all.extend(batch2["aic"])
-            bic1_all.extend(batch1["bic"])
-            bic2_all.extend(batch2["bic"])
+            aic1_all.extend(batch1[2]["aic"])
+            aic2_all.extend(batch2[2]["aic"])
+            bic1_all.extend(batch1[2]["bic"])
+            bic2_all.extend(batch2[2]["bic"])
 
         aic1_all = np.array(aic1_all)
         aic2_all = np.array(aic2_all)
@@ -2542,6 +2543,47 @@ def _(np):
         delta_aic = aic2_all - aic1_all
         delta_bic = bic2_all - bic1_all
 
+        # 3) PER-SCALE ΔAIC aggregated across batches
+        # determine max number of scales
+        max_scales = max(len(batch[2]["aic"]) for batch in fits_model1)
+
+        delta_per_scale = []
+
+        for scale_idx in range(max_scales):
+            scale_aic1 = []
+            scale_aic2 = []
+            scale_bic1 = []
+            scale_bic2 = []
+
+            for batch1, batch2 in zip(fits_model1, fits_model2):
+                aic1 = batch1[2]["aic"]
+                aic2 = batch2[2]["aic"]
+                bic1 = batch1[2]["bic"]
+                bic2 = batch2[2]["bic"]
+
+                if scale_idx < len(aic1):
+                    if not np.isnan(aic1[scale_idx]) and not np.isnan(aic2[scale_idx]):
+                        scale_aic1.append(aic1[scale_idx])
+                        scale_aic2.append(aic2[scale_idx])
+
+                    if not np.isnan(bic1[scale_idx]) and not np.isnan(bic2[scale_idx]):
+                        scale_bic1.append(bic1[scale_idx])
+                        scale_bic2.append(bic2[scale_idx])
+
+            if len(scale_aic1) > 0:
+                scale_delta_aic = np.array(scale_aic2) - np.array(scale_aic1)
+                scale_delta_bic = np.array(scale_bic2) - np.array(scale_bic1)
+
+                delta_per_scale.append({
+                    "scale": scale_idx,
+                    "mean_delta_aic": np.mean(scale_delta_aic),
+                    "sd_delta_aic": np.std(scale_delta_aic),
+                    "median_delta_aic": np.median(scale_delta_aic),
+                    "mean_delta_bic": np.mean(scale_delta_bic),
+                    "sd_delta_bic": np.std(scale_delta_bic),
+                    "median_delta_bic": np.median(scale_delta_bic),
+                })
+
         return {
             # global difference between avg AIC/BIC
             "delta_aic_global": delta_aic_global,
@@ -2554,16 +2596,197 @@ def _(np):
             # mean ± SD of per-row ΔAIC/BIC
             "mean_delta_aic": np.mean(delta_aic),
             "sd_delta_aic": np.std(delta_aic),
+            "median_delta_aic": np.median(delta_aic),
+            # "perc_delta_aic_gt_10": np.median
             "mean_delta_bic": np.mean(delta_bic),
             "sd_delta_bic": np.std(delta_bic),
+            "median_delta_bic": np.median(delta_bic),
+            # "perc_delta_aic_gt_10":
+            # per-scale ΔAIC/BIC aggregated across batches
+            "delta_per_scale": delta_per_scale
         }
+
 
     return (compute_delta_scores,)
 
 
 @app.cell
-def _(compute_delta_scores, snp_fits_gauss_with_score, snp_fits_with_score):
-    compute_delta_scores(snp_fits_gauss_with_score,snp_fits_with_score)
+def _(
+    btc_fits_exp_generalized,
+    btc_fits_generalized,
+    btc_fits_generalized_gauss,
+    compute_delta_scores,
+    np,
+    pd,
+    snp_fits_exp_generalized,
+    snp_fits_generalized,
+    snp_fits_generalized_gauss,
+):
+
+    sp_gauss_vs_asym = compute_delta_scores(snp_fits_generalized_gauss,snp_fits_generalized)
+    sp_asym_vs_exp   = compute_delta_scores(snp_fits_generalized,snp_fits_exp_generalized)
+    btc_gauss_vs_asym = compute_delta_scores(btc_fits_generalized_gauss,btc_fits_generalized)
+    btc_asym_vs_exp   = compute_delta_scores(btc_fits_generalized,btc_fits_exp_generalized)
+
+    comparison1 = "Gauss vs assymetric Gauss"
+    comparison2 = "assymetric Gauss vs assymetric Exp"
+
+    df_delta_aic = pd.DataFrame([
+        {
+            "Asset": "S&P500",
+            "Comparison": comparison1,
+            "Mean ΔAIC": sp_gauss_vs_asym["mean_delta_aic"],
+            "SD ΔAIC": sp_gauss_vs_asym["sd_delta_aic"],
+            "Median ΔAIC": sp_gauss_vs_asym["median_delta_aic"],
+            "% abs(ΔAIC) > 10": 100*np.sum(np.abs(sp_gauss_vs_asym["delta_aic"])>10)/len(sp_gauss_vs_asym["delta_aic"]),
+            "Mean ΔBIC": sp_gauss_vs_asym["mean_delta_bic"],
+            "SD ΔBIC": sp_gauss_vs_asym["sd_delta_bic"],
+            "Median ΔBIC": sp_gauss_vs_asym["median_delta_bic"],
+        },
+        {
+            "Asset": "S&P500",
+            "Comparison": comparison2,
+            "Mean ΔAIC": sp_asym_vs_exp["mean_delta_aic"],
+            "SD ΔAIC": sp_asym_vs_exp["sd_delta_aic"],
+            "Median ΔAIC": sp_asym_vs_exp["median_delta_aic"],
+            "% abs(ΔAIC) > 10": 100*np.sum(np.abs(sp_asym_vs_exp["delta_aic"])>10)/len(sp_asym_vs_exp["delta_aic"]),
+            "Mean ΔBIC": sp_asym_vs_exp["mean_delta_bic"],
+            "SD ΔBIC": sp_asym_vs_exp["sd_delta_bic"],
+            "Median ΔBIC": sp_asym_vs_exp["median_delta_bic"],
+        },
+        {
+            "Asset": "BTC",
+            "Comparison": comparison1,
+            "Mean ΔAIC": btc_gauss_vs_asym["mean_delta_aic"],
+            "SD ΔAIC": btc_gauss_vs_asym["sd_delta_aic"],
+            "Median ΔAIC": btc_gauss_vs_asym["median_delta_aic"],
+            "% abs(ΔAIC) > 10": 100*np.sum(np.abs(btc_gauss_vs_asym["delta_aic"])>10)/len(btc_gauss_vs_asym["delta_aic"]),
+            "Mean ΔBIC": btc_gauss_vs_asym["mean_delta_bic"],
+            "SD ΔBIC": btc_gauss_vs_asym["sd_delta_bic"],
+            "Median ΔBIC": btc_gauss_vs_asym["median_delta_bic"],
+        },
+        {
+            "Asset": "BTC",
+            "Comparison": comparison2,
+            "Mean ΔAIC": btc_asym_vs_exp["mean_delta_aic"],
+            "SD ΔAIC": btc_asym_vs_exp["sd_delta_aic"],
+            "Median ΔAIC": btc_asym_vs_exp["median_delta_aic"],
+            "% abs(ΔAIC) > 10": 100*np.sum(np.abs(btc_asym_vs_exp["delta_aic"])>10)/len(btc_asym_vs_exp["delta_aic"]),
+            "Mean ΔBIC": btc_asym_vs_exp["mean_delta_bic"],
+            "SD ΔBIC": btc_asym_vs_exp["sd_delta_bic"],
+            "Median ΔBIC": btc_asym_vs_exp["median_delta_bic"],
+        }
+    ])
+
+    df_delta_aic
+
+    return (sp_asym_vs_exp,)
+
+
+@app.cell
+def _(np, sp_asym_vs_exp):
+    np.abs(sp_asym_vs_exp["delta_aic"])>10
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _(np, plt):
+
+    def plot_delta_aic_per_scale_boxes(fits_model1, fits_model2, scales, title="ΔAIC per scale (model2 - model1)", meansdon=False):
+        """
+        For each scale s:
+          - collect ΔAIC_s across all batches
+          - draw a box at x = s (distribution across batches)
+          - overlay mean ± std as errorbars
+        """
+
+        # determine max number of scales
+        max_scales = max(len(batch[2]["aic"]) for batch in fits_model1)
+
+        # collect per-scale ΔAIC across batches
+        delta_per_scale = []
+        scale_indices = []
+
+        for scale_idx in range(max_scales):
+            deltas = []
+
+            for batch1, batch2 in zip(fits_model1, fits_model2):
+                aic1 = batch1[2]["aic"]
+                aic2 = batch2[2]["aic"]
+
+                if scale_idx < len(aic1):
+                    if not np.isnan(aic1[scale_idx]) and not np.isnan(aic2[scale_idx]):
+                        deltas.append(aic2[scale_idx] - aic1[scale_idx])
+
+            if len(deltas) > 0:
+                delta_per_scale.append(deltas)
+                scale_indices.append(scale_idx)
+
+        # compute mean and std per scale
+        means = [np.mean(d) for d in delta_per_scale]
+        stds  = [np.std(d) for d in delta_per_scale]
+
+        plt.figure(figsize=(14, 6))
+
+        # box per scale
+        plt.boxplot(
+            delta_per_scale,
+            positions=scale_indices,
+            widths=0.6,
+            patch_artist=True
+        )
+        if meansdon:
+        # mean ± std per scale
+            plt.errorbar(
+                scale_indices,
+                means,
+                yerr=stds,
+                fmt='o',
+                color='black',
+                capsize=5,
+                label='Mean ± SD'
+            )
+
+        plt.axhline(0, color="black", lw=1, ls="--")
+        plt.xlabel("Scale index")
+        plt.ylabel("ΔAIC (model2 - model1)")
+        plt.title(title)
+        plt.grid(alpha=0.3)
+        plt.legend()
+        plt.show()
+
+    return (plot_delta_aic_per_scale_boxes,)
+
+
+@app.cell
+def _(
+    btc_fits_exp_generalized,
+    btc_fits_generalized,
+    btc_fits_generalized_gauss,
+    plot_delta_aic_per_scale_boxes,
+    scales,
+    snp_fits_exp_generalized,
+    snp_fits_generalized,
+    snp_fits_generalized_gauss,
+):
+    plot_delta_aic_per_scale_boxes(snp_fits_generalized_gauss,snp_fits_generalized,scales,"ΔAIC per scale (assymetric Gauss - Gauss) S&P500")
+    plot_delta_aic_per_scale_boxes(snp_fits_generalized,snp_fits_exp_generalized,scales,"ΔAIC per scale (assymetric Gauss - assymetric Exp) S&P500")
+
+    plot_delta_aic_per_scale_boxes(btc_fits_generalized_gauss,btc_fits_generalized,scales,"ΔAIC per scale (assymetric Gauss - Gauss) BTC")
+    plot_delta_aic_per_scale_boxes(btc_fits_generalized,btc_fits_exp_generalized,scales,"ΔAIC per scale (assymetric Gauss - assymetric Exp) BTC")
+
+
+
+    return
+
+
+@app.cell
+def _():
     return
 
 
@@ -2813,6 +3036,8 @@ def _(Model, np, smooth_mi_map):
         param_names = model_spec.param_names()
         param_arrays = {name: np.full(len(scales), np.nan) for name in param_names}
         success = np.zeros(len(scales), dtype=bool)
+        #aic,bic
+        fit_scores = {"aic":np.full(len(scales), np.nan),"bic":np.full(len(scales), np.nan)}
 
         prev_params = None
         fail_streak = 0
@@ -2836,6 +3061,8 @@ def _(Model, np, smooth_mi_map):
                     param_arrays[name][i] = result.params[name].value
                 param_arrays["amplitude"][i] *= result.row_range
                 success[i] = True
+                fit_scores["aic"][i] = result.aic 
+                fit_scores["bic"][i] = result.bic 
                 prev_params = result.params
                 fail_streak = 0
             else:
@@ -2844,7 +3071,7 @@ def _(Model, np, smooth_mi_map):
                     prev_params = None
                     fail_streak = 0
 
-        return param_arrays, success
+        return param_arrays, success,fit_scores
 
 
     return (extract_single_ridge_lmfit,)
@@ -2970,7 +3197,7 @@ def _(SplitGaussianSpec, extract_single_ridge_lmfit, np, plt, smooth_mi_map):
     ):
         mi_map = np.array(mi_map)
 
-        param_arrays, ok = extract_single_ridge_lmfit(
+        param_arrays, ok, fit_scores = extract_single_ridge_lmfit(
             mi_map, scales, lags, model_spec,
             smooth_sigma_scale=smooth_sigma_scale,
             smooth_sigma_lag=smooth_sigma_lag,
@@ -2993,7 +3220,10 @@ def _(SplitGaussianSpec, extract_single_ridge_lmfit, np, plt, smooth_mi_map):
         )
 
         print(f"Successful fits: {ok.sum()} / {len(ok)}")
-        return param_arrays, ok
+        print(f"AICs: {fit_scores["aic"]}")
+        print(f"BICs: {fit_scores["bic"]}")
+
+        return param_arrays, ok, fit_scores
 
 
 
@@ -3169,13 +3399,26 @@ def _(
 
 
 @app.cell
+def _(
+    btc_fits_exp_generalized,
+    btc_fits_generalized,
+    btc_fits_generalized_gauss,
+    np,
+    snp_fits_exp_generalized,
+    snp_fits_generalized,
+    snp_fits_generalized_gauss,
+):
+    np.save("btc_fits_generalized_score.npy",np.array(btc_fits_generalized, dtype=object))
+    np.save("btc_fits_generalized_score_gauss.npy",np.array(btc_fits_generalized_gauss, dtype=object))
+    np.save("snp_fits_generalized_score.npy",np.array(snp_fits_generalized, dtype=object))
+    np.save("snp_fits_generalized_score_gauss.npy",np.array(snp_fits_generalized_gauss, dtype=object))
+    np.save("snp_fits_generalized_score_exp.npy",np.array(snp_fits_exp_generalized, dtype=object))
+    np.save("btc_fits_generalized_score_exp.npy",np.array(btc_fits_exp_generalized, dtype=object))
+    return
+
+
+@app.cell
 def _():
-    # np.save("btc_fits_generalized.npy",np.array(btc_fits_generalized, dtype=object))
-    # np.save("btc_fits_generalized_gauss.npy",np.array(btc_fits_generalized_gauss, dtype=object))
-    # np.save("snp_fits_generalized.npy",np.array(snp_fits_generalized, dtype=object))
-    # np.save("snp_fits_generalized_gauss.npy",np.array(snp_fits_generalized_gauss, dtype=object))
-    # np.save("snp_fits_generalized_exp.npy",np.array(snp_fits_exp_generalized, dtype=object))
-    # np.save("btc_fits_generalized_exp.npy",np.array(btc_fits_exp_generalized, dtype=object))
     return
 
 
