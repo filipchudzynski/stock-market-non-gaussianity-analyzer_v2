@@ -1889,13 +1889,12 @@ def _(np, plot_ridge_fit_publication, results_btc, results_snp, scales):
 
 
 @app.cell
-def _(btc_fits, np, plt, scales, snp_fits):
-    def plot_average_stats_publication(scales, snp_fits, btc_fits):
+def _(np, plt):
+    def plot_average_stats_publication(scales, snp_fits, btc_fits, metrics):
         """
         Publication‑grade comparison of mean ± std envelopes
         for ridge descriptors across scales.
         """
-
 
         # --- Global style (Springer‑compatible) -------------------------------
         plt.rcParams.update({
@@ -1912,48 +1911,68 @@ def _(btc_fits, np, plt, scales, snp_fits):
             "savefig.dpi": 600,
         })
 
-        # --- Compute statistics ------------------------------------------------
-        def compute_stats(fits):
-            arr = np.array(fits)              # shape: (n_fits, n_metrics, n_scales)
-            mean = arr.mean(axis=0)
-            std  = arr.std(axis=0)
-            return mean, std
+        # --- Extract descriptor arrays from new fits format -------------------
+        def extract_descriptor_arrays(fits, metrics):
+            """
+            fits: list of batches
+                  each batch is a tuple: (descriptor_dict, ...)
+            metrics: list of descriptor names
+            returns: dict metric -> 2D array (n_fits × n_scales)
+            """
+            out = {m: [] for m in metrics}
 
-        snp_mean, snp_std = compute_stats(snp_fits)
-        btc_mean, btc_std = compute_stats(btc_fits)
+            for batch in fits:
+                desc = batch[0]   # dictionary of fitted curves
 
-        metrics = ["ridge center", "σ_left", "σ_right", "amplitude"]
+                for m in metrics:
+                    out[m].append(np.array(desc[m]))
 
-        # --- Figure layout (double‑column width) -------------------------------
+            # convert lists to arrays
+            for m in metrics:
+                out[m] = np.vstack(out[m])   # shape: (n_fits, n_scales)
+
+            return out
+
+        snp_desc = extract_descriptor_arrays(snp_fits, metrics)
+        btc_desc = extract_descriptor_arrays(btc_fits, metrics)
+
+        # --- Compute mean and std --------------------------------------------
+        snp_mean = {m: snp_desc[m].mean(axis=0) for m in metrics}
+        snp_std  = {m: snp_desc[m].std(axis=0)  for m in metrics}
+
+        btc_mean = {m: btc_desc[m].mean(axis=0) for m in metrics}
+        btc_std  = {m: btc_desc[m].std(axis=0)  for m in metrics}
+
+        # --- Figure layout ----------------------------------------------------
         fig, axes = plt.subplots(
             2, 2,
-            figsize=(6.73, 5.2),   # 17.1 cm × 13.2 cm
+            figsize=(6.73, 5.2),
             constrained_layout=True
         )
         axes = axes.flatten()
 
         panel_labels = ["(a)", "(b)", "(c)", "(d)"]
 
-        # --- Plot each descriptor ----------------------------------------------
+        # --- Plot each descriptor --------------------------------------------
         for i, metric in enumerate(metrics):
             ax = axes[i]
 
             # S&P500
-            ax.plot(scales, snp_mean[i], color="steelblue", label="S&P500")
+            ax.plot(scales, snp_mean[metric], color="steelblue", label="S&P500")
             ax.fill_between(
                 scales,
-                snp_mean[i] - snp_std[i],
-                snp_mean[i] + snp_std[i],
+                snp_mean[metric] - snp_std[metric],
+                snp_mean[metric] + snp_std[metric],
                 color="steelblue",
                 alpha=0.20
             )
 
             # BTC
-            ax.plot(scales, btc_mean[i], color="darkorange", label="BTC")
+            ax.plot(scales, btc_mean[metric], color="darkorange", label="BTC")
             ax.fill_between(
                 scales,
-                btc_mean[i] - btc_std[i],
-                btc_mean[i] + btc_std[i],
+                btc_mean[metric] - btc_std[metric],
+                btc_mean[metric] + btc_std[metric],
                 color="darkorange",
                 alpha=0.20
             )
@@ -1977,96 +1996,123 @@ def _(btc_fits, np, plt, scales, snp_fits):
                 fontsize=9,
                 va="top", ha="left"
             )
-        filename = "descriptors_BTC_SnP" # e.g. "ridge_center"
+
+        filename = "descriptors_BTC_SnP"
         fig.savefig(f"{filename}.pdf", bbox_inches="tight")
         plt.show()
+
         return snp_mean, snp_std, btc_mean, btc_std
-    plot_average_stats_publication(scales, snp_fits, btc_fits)
-    return
+
+
+    return (plot_average_stats_publication,)
+
+
+@app.function
+def plot_average_stats_publication_single(scales, snp_fits, btc_fits):
+    """
+    Publication‑grade single‑panel figures for each descriptor.
+    Springer‑compatible: serif fonts, clean layout, single‑column width.
+    """
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    # --- Global Springer‑style settings -----------------------------------
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.size": 9,
+        "axes.labelsize": 9,
+        "axes.titlesize": 9,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 8,
+        "axes.linewidth": 0.8,
+        "lines.linewidth": 1.0,
+        "figure.dpi": 300,
+        "savefig.dpi": 600,
+    })
+
+    # --- Extract descriptor arrays from new fits format -------------------
+    def extract_descriptor_arrays(fits, metrics):
+        """
+        fits: list of batches
+              each batch is a tuple: (descriptor_dict, ...)
+        metrics: list of descriptor names
+        returns: dict metric -> 2D array (n_fits × n_scales)
+        """
+        out = {m: [] for m in metrics}
+
+        for batch in fits:
+            desc = batch[0]   # dictionary of fitted curves
+
+            for m in metrics:
+                out[m].append(np.array(desc[m]))
+
+        # convert lists to arrays
+        for m in metrics:
+            out[m] = np.vstack(out[m])   # shape: (n_fits, n_scales)
+
+        return out
+
+    metrics = ["center", "sigma_left", "sigma_right", "amplitude"]
+
+    snp_desc = extract_descriptor_arrays(snp_fits, metrics)
+    btc_desc = extract_descriptor_arrays(btc_fits, metrics)
+
+    # --- Compute mean and std --------------------------------------------
+    snp_mean = {m: snp_desc[m].mean(axis=0) for m in metrics}
+    snp_std  = {m: snp_desc[m].std(axis=0)  for m in metrics}
+
+    btc_mean = {m: btc_desc[m].mean(axis=0) for m in metrics}
+    btc_std  = {m: btc_desc[m].std(axis=0)  for m in metrics}
+
+    # --- Loop over metrics and produce one figure per metric --------------
+    for metric in metrics:
+
+        fig, ax = plt.subplots(figsize=(3.27, 2.6))  # 8.3 cm × 6.6 cm (single‑column)
+
+        # S&P500
+        ax.plot(scales, snp_mean[metric], color="steelblue", label="S&P500")
+        ax.fill_between(
+            scales,
+            snp_mean[metric] - snp_std[metric],
+            snp_mean[metric] + snp_std[metric],
+            color="steelblue",
+            alpha=0.20
+        )
+
+        # BTC
+        ax.plot(scales, btc_mean[metric], color="darkorange", label="BTC")
+        ax.fill_between(
+            scales,
+            btc_mean[metric] - btc_std[metric],
+            btc_mean[metric] + btc_std[metric],
+            color="darkorange",
+            alpha=0.20
+        )
+
+        ax.set_xscale("log")
+        ax.set_xlabel("Scale $s$")
+        ax.set_title(metric)
+
+        if metric == "amplitude":
+            ax.set_ylabel("Amplitude")
+        else:
+            ax.set_ylabel("Lag $\\tau$")
+
+        ax.grid(alpha=0.3)
+        ax.legend(frameon=False)
+
+        fig.tight_layout()
+        filename = metric.replace(" ", "_")
+        fig.savefig(f"{filename}.pdf", bbox_inches="tight")
+        plt.show()
+
+    return snp_mean, snp_std, btc_mean, btc_std
 
 
 @app.cell
-def _(btc_fits, scales, snp_fits):
-    def plot_average_stats_publication_single(scales, snp_fits, btc_fits):
-        """
-        Publication‑grade single‑panel figures for each descriptor.
-        Springer‑compatible: serif fonts, clean layout, single‑column width.
-        """
-
-        import numpy as np
-        import matplotlib.pyplot as plt
-
-        # --- Global Springer‑style settings -----------------------------------
-        plt.rcParams.update({
-            "font.family": "serif",
-            "font.size": 9,
-            "axes.labelsize": 9,
-            "axes.titlesize": 9,
-            "xtick.labelsize": 8,
-            "ytick.labelsize": 8,
-            "legend.fontsize": 8,
-            "axes.linewidth": 0.8,
-            "lines.linewidth": 1.0,
-            "figure.dpi": 300,
-            "savefig.dpi": 600,
-        })
-
-        # --- Compute statistics ------------------------------------------------
-        def compute_stats(fits):
-            arr = np.array(fits)              # shape: (n_fits, n_metrics, n_scales)
-            mean = arr.mean(axis=0)
-            std  = arr.std(axis=0)
-            return mean, std
-
-        snp_mean, snp_std = compute_stats(snp_fits)
-        btc_mean, btc_std = compute_stats(btc_fits)
-
-        metrics = ["ridge center", "σ_left", "σ_right", "amplitude"]
-
-        # --- Loop over metrics and produce one figure per metric --------------
-        for i, metric in enumerate(metrics):
-
-            fig, ax = plt.subplots(figsize=(3.27, 2.6))  # 8.3 cm × 6.6 cm (single‑column)
-
-            # S&P500
-            ax.plot(scales, snp_mean[i], color="steelblue", label="S&P500")
-            ax.fill_between(
-                scales,
-                snp_mean[i] - snp_std[i],
-                snp_mean[i] + snp_std[i],
-                color="steelblue",
-                alpha=0.20
-            )
-
-            # BTC
-            ax.plot(scales, btc_mean[i], color="darkorange", label="BTC")
-            ax.fill_between(
-                scales,
-                btc_mean[i] - btc_std[i],
-                btc_mean[i] + btc_std[i],
-                color="darkorange",
-                alpha=0.20
-            )
-
-            ax.set_xscale("log")
-            ax.set_xlabel("Scale $s$")
-            ax.set_title(metric)
-
-            if metric == "amplitude":
-                ax.set_ylabel("Amplitude")
-            else:
-                ax.set_ylabel("Lag $\\tau$")
-
-            ax.grid(alpha=0.3)
-            ax.legend(frameon=False)
-
-            fig.tight_layout()
-            filename = metric.replace(" ", "_")  # e.g. "ridge_center"
-            fig.savefig(f"{filename}.pdf", bbox_inches="tight")
-            plt.show()
-
-        return snp_mean, snp_std, btc_mean, btc_std
-    plot_average_stats_publication_single(scales, snp_fits, btc_fits)
+def _():
     return
 
 
@@ -2104,28 +2150,673 @@ def _():
 
 
 @app.cell
-def _(scales):
-    scales[15]
+def _(mo):
+
+    mo.md(r"""
+    # generalized fitting
+    """)
+    return
+
+
+@app.cell
+def _(np, plt, smooth_mi_map):
+
+
+    from lmfit import Model
+    # ───────────────────────────────────────────────────────────────────────
+    #  MODEL SPECIFICATION SYSTEM
+    # ───────────────────────────────────────────────────────────────────────
+
+    class BaseModelSpec:
+        """Abstract interface for pluggable models."""
+        name = "base"
+
+        def model_func(self, x, **params):
+            raise NotImplementedError
+
+        def make_params(self, model, amplitude_thresh, center_init, center_range,
+                        sigma_init, sigma_min, sigma_max):
+            raise NotImplementedError
+
+        def reconstruct(self, x, params, row_display):
+            """Return fitted curve in original scale."""
+            raise NotImplementedError
+
+        def param_names(self):
+            """Return list of parameter names to extract."""
+            raise NotImplementedError
+
+    class SplitGaussianSpec(BaseModelSpec):
+        name = "split_gaussian"
+
+        def model_func(self, x, amplitude, center, sigma_left, sigma_right):
+            sigma = np.where(x < center, sigma_left, sigma_right)
+            return amplitude * np.exp(-0.5 * ((x - center) / sigma)**2)
+
+        def make_params(self, model, amplitude_thresh, center_init, center_range,
+                        sigma_init, sigma_min, sigma_max):
+            return model.make_params(
+                amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
+                center=dict(value=center_init,
+                            min=center_init - center_range,
+                            max=center_init + center_range),
+                sigma_left=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+                sigma_right=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+            )
+
+        def reconstruct(self, x, params, row_display):
+            return self.model_func(
+                x,
+                amplitude=row_display.max(),
+                center=params['center'],
+                sigma_left=params['sigma_left'],
+                sigma_right=params['sigma_right'],
+            )
+
+        def param_names(self):
+            return ["center", "sigma_left", "sigma_right", "amplitude"]
+
+    class GaussianSpec(BaseModelSpec):
+        name = "gaussian"
+
+        def model_func(self, x, amplitude, center, sigma):
+            return amplitude * np.exp(-0.5 * ((x - center) / sigma)**2)
+
+        def make_params(self, model, amplitude_thresh, center_init, center_range,
+                        sigma_init, sigma_min, sigma_max):
+            return model.make_params(
+                amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
+                center=dict(value=center_init,
+                            min=center_init - center_range,
+                            max=center_init + center_range),
+                sigma=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+            )
+
+        def reconstruct(self, x, params, row_display):
+            return self.model_func(
+                x,
+                amplitude=row_display.max(),
+                center=params['center'],
+                sigma=params['sigma'],
+            )
+
+        def param_names(self):
+            return ["center", "sigma", "amplitude"]
+
+
+    class TwoSidedExpSpec(BaseModelSpec):
+        name = "two_sided_exp(Laplace)"
+
+        def model_func(self, x, amplitude, center, sigma_left, sigma_right):
+            b = np.where(x < center, sigma_left, sigma_right)
+            return amplitude * np.exp(-np.abs(x - center) / b)
+
+        def make_params(self, model, amplitude_thresh, center_init, center_range,
+                        sigma_init, sigma_min, sigma_max):
+            return model.make_params(
+                amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
+                center=dict(value=center_init,
+                            min=center_init - center_range,
+                            max=center_init + center_range),
+                sigma_left=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+                sigma_right=dict(value=sigma_init, min=sigma_min, max=sigma_max),
+            )
+
+        def reconstruct(self, x, params, row_display):
+            return self.model_func(
+                x,
+                amplitude=row_display.max(),
+                center=params['center'],
+                sigma_left=params['sigma_left'],
+                sigma_right=params['sigma_right'],
+            )
+
+        def param_names(self):
+            return ["center", "sigma_left", "sigma_right", "amplitude"]
+
+    def fit_single_ridge(row, lags, model_spec,
+                         prev_params=None,
+                         center_init=0.0, center_range=150.0,
+                         sigma_init=30.0, sigma_min=2.0, sigma_max=400.0,
+                         amplitude_thresh=0.05):
+        model = Model(model_spec.model_func)
+
+        baseline = np.percentile(row, 10)
+        row_centered = row - baseline
+        row_range = row_centered.max()
+
+        if row_range < amplitude_thresh:
+            return None, False
+
+        row_norm = row_centered / row_range
+
+        if prev_params is not None:
+            params = prev_params.copy()
+            params['center'].set(
+                min=params['center'].value - center_range,
+                max=params['center'].value + center_range,
+            )
+            params['amplitude'].set(value=1.0, min=amplitude_thresh, max=1.5)
+        else:
+            params = model_spec.make_params(
+                model,
+                amplitude_thresh,
+                center_init,
+                center_range,
+                sigma_init,
+                sigma_min,
+                sigma_max,
+            )
+
+        try:
+            result = model.fit(row_norm, params, x=lags)
+        except Exception:
+            return None, False
+
+        p = result.params
+        amp = p['amplitude'].value
+        center = p['center'].value
+
+        failed = (
+            not result.success
+            or amp < amplitude_thresh
+            or not (lags[0] < center < lags[-1])
+            or result.redchi > 1.0
+        )
+
+        if failed:
+            return None, False
+
+        result.row_range = row_range
+        result.baseline = baseline
+        return result, True
+
+    def extract_single_ridge_lmfit(mi_map, scales, lags, model_spec,
+                                   smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+                                   center_init=0.0, center_range=150.0,
+                                   sigma_init=30.0, sigma_max=400.0,
+                                   amplitude_thresh=0.05,
+                                   fit_window=None):
+        sm = smooth_mi_map(mi_map,
+                           sigma_scale=smooth_sigma_scale,
+                           sigma_lag=smooth_sigma_lag)
+
+        if fit_window is not None:
+            lo, hi = fit_window
+            mask = (lags >= lo) & (lags <= hi)
+            lags_fit = lags[mask]
+            sm_fit = sm[:, mask]
+        else:
+            lags_fit = lags
+            sm_fit = sm
+
+        param_names = model_spec.param_names()
+        param_arrays = {name: np.full(len(scales), np.nan) for name in param_names}
+        success = np.zeros(len(scales), dtype=bool)
+        #aic,bic
+        fit_scores = {"aic":np.full(len(scales), np.nan),"bic":np.full(len(scales), np.nan)}
+
+        prev_params = None
+        fail_streak = 0
+        MAX_FAILS = 5
+
+        for i in range(len(scales) - 1, -1, -1):
+            row = sm_fit[i]
+
+            result, ok = fit_single_ridge(
+                row, lags_fit, model_spec,
+                prev_params=prev_params,
+                center_init=center_init,
+                center_range=center_range,
+                sigma_init=sigma_init,
+                sigma_max=sigma_max,
+                amplitude_thresh=amplitude_thresh,
+            )
+
+            if ok:
+                for name in param_names:
+                    param_arrays[name][i] = result.params[name].value
+                param_arrays["amplitude"][i] *= result.row_range
+                success[i] = True
+                fit_scores["aic"][i] = result.aic 
+                fit_scores["bic"][i] = result.bic 
+                prev_params = result.params
+                fail_streak = 0
+            else:
+                fail_streak += 1
+                if fail_streak >= MAX_FAILS:
+                    prev_params = None
+                    fail_streak = 0
+
+        return param_arrays, success,fit_scores
+
+
+    def plot_fit_at_scale(ax, sm, lags, scales, param_arrays, success,
+                          model_spec, target_scale=100.0):
+        i = np.argmin(np.abs(scales - target_scale))
+        row = sm[i]
+
+        baseline = np.percentile(row, 10)
+        row_display = row - baseline
+
+        ax.scatter(lags, row_display, s=6, color='steelblue', alpha=0.6)
+
+        if success[i]:
+            params = {name: param_arrays[name][i] for name in model_spec.param_names()}
+            fitted = model_spec.reconstruct(lags, params, row_display)
+            ax.plot(lags, fitted, 'r-', lw=1.8)
+            ax.axvline(params["center"], color='white', lw=1.0, ls='--')
+
+        ax.set_xlabel("Lag τ")
+        ax.set_ylabel("MI (baseline sub.)")
+
+    def plot_single_ridge_lmfit(mi_map, scales, lags,
+                                 param_arrays, success,
+                                 model_spec,
+                                 title="",
+                                 smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+                                 diagnostic_scale=100.0):
+        sm = smooth_mi_map(mi_map, smooth_sigma_scale, smooth_sigma_lag)
+
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10),
+                                 gridspec_kw={'width_ratios': [3, 1],
+                                              'height_ratios': [2, 1]})
+
+        # ── top-left: heatmap + ridge curves ──────────────────────────────
+        ax = axes[0, 0]
+        pcm = ax.pcolormesh(lags, scales, sm, cmap='viridis', shading='auto')
+        ax.set_yscale('log')
+        ax.set_xlabel('Lag τ')
+        ax.set_ylabel('Scale s')
+        ax.set_title(f"{title} — model={model_spec.name}")
+        plt.colorbar(pcm, ax=ax, label='MI')
+
+        centers = param_arrays["center"]
+        s_ok = scales[success]
+        c_ok = centers[success]
+
+        # center curve
+        ax.plot(c_ok, s_ok, 'w--', lw=1.5, label='center')
+
+        # ridge edges: depend on model
+        if model_spec.name == "split_gaussian" or model_spec.name == "two_sided_exp(Laplace)":
+            sl_ok = param_arrays["sigma_left"][success]
+            sr_ok = param_arrays["sigma_right"][success]
+            ax.plot(c_ok - sl_ok, s_ok, color='cyan', lw=1, ls=':', label='−σ_left')
+            ax.plot(c_ok + sr_ok, s_ok, color='orange', lw=1, ls=':', label='+σ_right')
+        elif model_spec.name == "gaussian" or model_spec.name == "two_sided_exp(Laplace)":
+            sigma_ok = param_arrays["sigma"][success]
+            ax.plot(c_ok - sigma_ok, s_ok, color='cyan', lw=1, ls=':', label='−σ')
+            ax.plot(c_ok + sigma_ok, s_ok, color='orange', lw=1, ls=':', label='+σ')
+
+        if diagnostic_scale is not None:
+            ax.axhline(diagnostic_scale, color='red', lw=0.8, ls='--', alpha=0.6)
+
+        s_fail = scales[~success]
+        if len(s_fail):
+            ax.scatter(np.zeros(len(s_fail)), s_fail, c='red', s=4, zorder=5)
+
+        ax.legend(fontsize=8)
+
+        # ── top-right: diagnostics ────────────────────────────────────────
+        ax2 = axes[0, 1]
+        ax2.set_title("Diagnostics")
+
+        if model_spec.name == "split_gaussian" or model_spec.name == "two_sided_exp(Laplace)":
+            sl_ok = param_arrays["sigma_left"][success]
+            sr_ok = param_arrays["sigma_right"][success]
+            ratio = sr_ok / sl_ok
+            ax2.plot(ratio, s_ok, 'k-o', ms=2)
+            ax2.axvline(1.0, color='gray', lw=0.8, ls='--')
+            ax2.set_xscale('log')
+            ax2.set_yscale('log')
+            ax2.set_xlabel('σ_right / σ_left')
+            ax2.set_ylabel('Scale s')
+        else:
+            ax2.text(0.1, 0.5, "No asymmetry diagnostics\nfor this model",
+                     transform=ax2.transAxes)
+
+        # ── bottom-left: single-scale fit diagnostic ──────────────────────
+        if diagnostic_scale is not None:
+            ax3 = axes[1, 0]
+            ax3.set_facecolor('#1a1a2e')
+            plot_fit_at_scale(ax3, sm, lags, scales,
+                              param_arrays, success,
+                              model_spec,
+                              target_scale=diagnostic_scale)
+        else:
+            axes[1, 0].axis('off')
+
+        # ── bottom-right: unused ──────────────────────────────────────────
+        axes[1, 1].axis('off')
+
+        plt.tight_layout()
+        plt.show()
+
+
+
+
+    def extract_single_ridge_and_plot(
+            mi_map=None, scales=None, lags=None,
+            title="",
+            center_init=0.0, center_range=150.0,
+            sigma_init=30.0, sigma_max=200.0,
+            amplitude_thresh=0.05,
+            smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
+            diagnostic_scale=100.0,
+            fit_window=None,
+            model_spec=SplitGaussianSpec(),   # NEW DEFAULT
+    ):
+        mi_map = np.array(mi_map)
+
+        param_arrays, ok, fit_scores = extract_single_ridge_lmfit(
+            mi_map, scales, lags, model_spec,
+            smooth_sigma_scale=smooth_sigma_scale,
+            smooth_sigma_lag=smooth_sigma_lag,
+            center_init=center_init,
+            center_range=center_range,
+            sigma_init=sigma_init,
+            sigma_max=sigma_max,
+            amplitude_thresh=amplitude_thresh,
+            fit_window=fit_window,
+        )
+
+        plot_single_ridge_lmfit(
+            mi_map, scales, lags,
+            param_arrays, ok,
+            model_spec=model_spec,
+            title=title,
+            smooth_sigma_scale=smooth_sigma_scale,
+            smooth_sigma_lag=smooth_sigma_lag,
+            diagnostic_scale=diagnostic_scale
+        )
+
+        print(f"Successful fits: {ok.sum()} / {len(ok)}")
+        print(f"AICs: {fit_scores["aic"]}")
+        print(f"BICs: {fit_scores["bic"]}")
+
+        return param_arrays, ok, fit_scores
+
+    return (
+        GaussianSpec,
+        SplitGaussianSpec,
+        TwoSidedExpSpec,
+        extract_single_ridge_and_plot,
+    )
+
+
+@app.cell
+def _(
+    SplitGaussianSpec,
+    extract_single_ridge_and_plot,
+    np,
+    results_snp_merged,
+    scales,
+):
+    snp_fits_generalized=[]
+    for _i,_ in enumerate(results_snp_merged):
+        snp_fits_generalized.append(extract_single_ridge_and_plot(
+            mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
+            scales          = scales,
+            lags            = np.linspace(-800, 800, 801),
+            title           = "S&P500",
+            center_init     = 0.0,
+            center_range    = 100.0,
+            sigma_init      = 20.0,
+            sigma_max       = 200.0,       # tighter than before
+            amplitude_thresh= 0.05,
+            diagnostic_scale=None,
+            fit_window      = (-300, 300), # ignore flat tails entirely
+            smooth_sigma_lag= 0,smooth_sigma_scale=0,
+            model_spec=SplitGaussianSpec(),   # NEW DEFAULT
+        ))
+    return (snp_fits_generalized,)
+
+
+@app.cell
+def _(
+    GaussianSpec,
+    extract_single_ridge_and_plot,
+    np,
+    results_snp_merged,
+    scales,
+):
+    snp_fits_generalized_gauss=[]
+    for _i,_ in enumerate(results_snp_merged):
+        snp_fits_generalized_gauss.append(extract_single_ridge_and_plot(
+            mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
+            scales          = scales,
+            lags            = np.linspace(-800, 800, 801),
+            title           = "S&P500",
+            center_init     = 0.0,
+            center_range    = 100.0,
+            sigma_init      = 20.0,
+            sigma_max       = 200.0,       # tighter than before
+            amplitude_thresh= 0.05,
+            diagnostic_scale=None,
+            fit_window      = (-300, 300), # ignore flat tails entirely
+            smooth_sigma_lag= 0,smooth_sigma_scale=0,
+            model_spec=GaussianSpec(),   # NEW DEFAULT
+        ))
+    return (snp_fits_generalized_gauss,)
+
+
+@app.cell
+def _(
+    TwoSidedExpSpec,
+    extract_single_ridge_and_plot,
+    np,
+    results_snp_merged,
+    scales,
+):
+    snp_fits_exp_generalized=[]
+    for _i,_ in enumerate(results_snp_merged):
+        snp_fits_exp_generalized.append(extract_single_ridge_and_plot(
+            mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
+            scales          = scales,
+            lags            = np.linspace(-800, 800, 801),
+            title           = "S&P500",
+            center_init     = 0.0,
+            center_range    = 100.0,
+            sigma_init      = 20.0,
+            sigma_max       = 200.0,       # tighter than before
+            amplitude_thresh= 0.05,
+            diagnostic_scale=None,
+            fit_window      = (-300, 300), # ignore flat tails entirely
+            smooth_sigma_lag= 0,smooth_sigma_scale=0,
+            model_spec=TwoSidedExpSpec(),   # NEW DEFAULT
+        ))
+    return (snp_fits_exp_generalized,)
+
+
+@app.cell
+def _(
+    SplitGaussianSpec,
+    extract_single_ridge_and_plot,
+    np,
+    results_btc_merged,
+    scales,
+):
+    btc_fits_generalized=[]
+    for _i,_ in enumerate(results_btc_merged):
+        btc_fits_generalized.append(extract_single_ridge_and_plot(
+            mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
+            scales          = scales,
+            lags            = np.linspace(-800, 800, 801),
+            title           = "BTC",
+            center_init     = 0.0,
+            center_range    = 100.0,
+            sigma_init      = 20.0,
+            sigma_max       = 200.0,       # tighter than before
+            amplitude_thresh= 0.05,
+            diagnostic_scale=None,
+            fit_window      = (-300, 300), # ignore flat tails entirely
+            smooth_sigma_lag= 0,smooth_sigma_scale=0,
+            model_spec=SplitGaussianSpec(),   # NEW DEFAULT
+        ))
+    return (btc_fits_generalized,)
+
+
+@app.cell
+def _(
+    GaussianSpec,
+    extract_single_ridge_and_plot,
+    np,
+    results_btc_merged,
+    scales,
+):
+    btc_fits_generalized_gauss=[]
+    for _i,_ in enumerate(results_btc_merged):
+        btc_fits_generalized_gauss.append(extract_single_ridge_and_plot(
+            mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
+            scales          = scales,
+            lags            = np.linspace(-800, 800, 801),
+            title           = "BTC",
+            center_init     = 0.0,
+            center_range    = 100.0,
+            sigma_init      = 20.0,
+            sigma_max       = 200.0,       # tighter than before
+            amplitude_thresh= 0.05,
+            diagnostic_scale=None,
+            fit_window      = (-300, 300), # ignore flat tails entirely
+            smooth_sigma_lag= 0,smooth_sigma_scale=0,
+            model_spec=GaussianSpec(),   # NEW DEFAULT
+        ))
+
+    return (btc_fits_generalized_gauss,)
+
+
+@app.cell
+def _(
+    TwoSidedExpSpec,
+    extract_single_ridge_and_plot,
+    np,
+    results_btc_merged,
+    scales,
+):
+    btc_fits_exp_generalized=[]
+    for _i,_ in enumerate(results_btc_merged):
+        btc_fits_exp_generalized.append(extract_single_ridge_and_plot(
+            mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
+            scales          = scales,
+            lags            = np.linspace(-800, 800, 801),
+            title           = "BTC",
+            center_init     = 0.0,
+            center_range    = 100.0,
+            sigma_init      = 20.0,
+            sigma_max       = 200.0,       # tighter than before
+            amplitude_thresh= 0.05,
+            diagnostic_scale=None,
+            fit_window      = (-300, 300), # ignore flat tails entirely
+            smooth_sigma_lag= 0,smooth_sigma_scale=0,
+            model_spec=TwoSidedExpSpec(),   # NEW DEFAULT
+        ))
+
+    return (btc_fits_exp_generalized,)
+
+
+@app.cell
+def _(SplitGaussianSpec):
+    SplitGaussianSpec().param_names()
+    return
+
+
+@app.cell
+def _(
+    SplitGaussianSpec,
+    btc_fits_generalized,
+    plot_average_stats_publication,
+    scales,
+    snp_fits_generalized,
+):
+    plot_average_stats_publication(scales, snp_fits_generalized, btc_fits_generalized,metrics=SplitGaussianSpec().param_names())
+
+    return
+
+
+@app.cell
+def _(
+    SplitGaussianSpec,
+    btc_fits_exp_generalized,
+    plot_average_stats_publication,
+    scales,
+    snp_fits_exp_generalized,
+):
+    plot_average_stats_publication(scales, snp_fits_exp_generalized, btc_fits_exp_generalized,metrics=SplitGaussianSpec().param_names())
+    return
+
+
+@app.cell
+def _():
+    # np.save("btc_fits_generalized_score.npy",np.array(btc_fits_generalized, dtype=object))
+    # np.save("snp_fits_generalized_score.npy",np.array(snp_fits_generalized, dtype=object))
+    # np.save("snp_fits_generalized_score_gauss.npy",np.array(snp_fits_generalized_gauss, dtype=object))
+    # np.save("snp_fits_generalized_score_exp.npy",np.array(snp_fits_exp_generalized, dtype=object))
+    # np.save("btc_fits_generalized_score_exp.npy",np.array(btc_fits_exp_generalized, dtype=object))
+    return
+
+
+@app.cell
+def _():
+    # btc_fits_generalized=np.load("btc_fits_generalized_score.npy",allow_pickle=True)
+    # btc_fits_generalized_gauss=np.load("btc_fits_generalized_score_gauss.npy",allow_pickle=True)
+    # btc_fits_exp_generalized=np.load("btc_fits_generalized_score_exp.npy",allow_pickle=True)
+
+    # snp_fits_generalized=np.load("snp_fits_generalized_score.npy",allow_pickle=True)
+    # snp_fits_generalized_gauss=np.load("snp_fits_generalized_score_gauss.npy",allow_pickle=True)
+    # snp_fits_exp_generalized=np.load("snp_fits_generalized_score_exp.npy",allow_pickle=True)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    # AIC/BIC model validation
+    we're fitting a model f to signal y with error ϵ
+
+    $y_i=f(x_i)+ϵ_i$
+
+    log likelihood for signal with gaussian noise model can be defined as
+
+    $ln⁡L=−2*n* ln⁡(2πs^2)−∑_{i}^{n}(y_i−f(x_i))^2/(2s^2)$
+
+    where s^2=var
+
+    and the aic bic takes form
+
+    $AIC = 2*k - 2*logL$
+
+    $BIC = ln(n)*k - 2*logL$
+    """)
     return
 
 
 @app.cell
 def _(np):
-    btc_fits_generalized=np.load("btc_fits_generalized_score.npy",allow_pickle=True)
-    btc_fits_generalized_gauss=np.load("btc_fits_generalized_score_gauss.npy",allow_pickle=True)
-    btc_fits_exp_generalized=np.load("btc_fits_generalized_score_exp.npy",allow_pickle=True)
 
-    snp_fits_generalized=np.load("snp_fits_generalized_score.npy",allow_pickle=True)
-    snp_fits_generalized_gauss=np.load("snp_fits_generalized_score_gauss.npy",allow_pickle=True)
-    snp_fits_exp_generalized=np.load("snp_fits_generalized_score_exp.npy",allow_pickle=True)
-    return (
-        btc_fits_exp_generalized,
-        btc_fits_generalized,
-        btc_fits_generalized_gauss,
-        snp_fits_exp_generalized,
-        snp_fits_generalized,
-        snp_fits_generalized_gauss,
-    )
+
+    def compute_logLikelihood(x,y,model,params):
+        residuals = y - model(x=x,**params)
+        var = np.var(residuals,ddof=1)
+        n=len(y)
+        return -0.5*n*np.log(2*np.pi*var) - np.sum(residuals**2)/(2*var)
+
+    def AIC(logl,k):
+        return 2*k - 2*logl
+
+    def BIC(logl,k,n):
+        return np.log(n)*k - 2*logl
+
+
+    return AIC, BIC, compute_logLikelihood
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    In this section there is manual implementation of aic/bic calculation, which was finally not used for comparison of model, because lmfit provide those kind of scores for its fits
+    """)
+    return
 
 
 @app.cell
@@ -2188,10 +2879,10 @@ def _(AIC, BIC, SplitGaussianSpec, compute_logLikelihood, np, plt):
                 _aic = AIC(_logl, k)
                 _bic = BIC(_logl, k, len(_x))
 
-                if(_batch%5==0 and (_i==0  or _i==5 or _i==15)):
+                if(_batch%5==0):
                     plt.plot(_x,y_centered)
                     plt.plot(_x,_fit)
-                    plt.title(f"AIC:{batch[2]["aic"][_i]} BIC:{batch[2]["bic"][_i]}")
+                    plt.title(f"batch {_batch} AIC:{batch[2]["aic"][_i]} BIC:{batch[2]["bic"][_i]}")
                     plt.show()
 
                 logls.append(_logl)
@@ -2232,12 +2923,6 @@ def _(AIC, BIC, SplitGaussianSpec, compute_logLikelihood, np, plt):
 
 
     return compute_aic_bic, compute_average_scores
-
-
-@app.cell
-def _(snp_fits_generalized):
-    snp_fits_generalized[0][2]["bic"]
-    return
 
 
 @app.cell
@@ -2850,7 +3535,7 @@ def _(btc_fits_generalized, snp_fits_generalized):
     fill_pool(sample_pool, "BTC", btc_fits_generalized)
     fill_pool(sample_pool, "S&P", snp_fits_generalized)
 
-    return (sample_pool,)
+    return fill_pool, parameters, sample_pool
 
 
 @app.cell
@@ -2945,6 +3630,14 @@ def _(compare_all_parameters_all_scales, sample_pool, scales):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # ROC/AUC
+    """)
+    return
+
+
 @app.cell
 def _(np, plt):
     from sklearn.metrics import roc_auc_score
@@ -3027,7 +3720,7 @@ def _(np, plt):
 
             fpr, tpr, _ = roc_curve(labels, scores)
 
-            plt.plot(fpr, tpr, label=f"Scale {scale}")
+            plt.plot(fpr, tpr, ls=":",label=f"Scale {scale}")
 
         plt.plot([0, 1], [0, 1], 'k--', label="Random (AUC=0.5)")
         plt.xlabel("False Positive Rate (FPR)")
@@ -3080,591 +3773,45 @@ def _(plot_roc_per_scale, sample_pool):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # AIC/BIC model validation
-    we're fitting a model f to signal y with error ϵ
-
-    $y_i=f(x_i)+ϵ_i$
-
-    log likelihood for signal with gaussian noise model can be defined as
-
-    $ln⁡L=−2*n* ln⁡(2πs^2)−∑_{i}^{n}(y_i−f(x_i))^2/(2s^2)$
-
-    where s^2=var
-
-    and the aic bic takes form
-
-    $AIC = 2*k - 2*logL$
-
-    $BIC = ln(n)*k - 2*logL$
+    ## EXP
     """)
-    return
-
-
-@app.cell
-def _(np):
-    def compute_logLikelihood(x,y,model,params):
-        residuals = y - model(x=x,**params)
-        var = np.var(residuals,ddof=1)
-        n=len(y)
-        return -0.5*n*np.log(2*np.pi*var) - np.sum(residuals**2)/(2*var)
-
-    def AIC(logl,k):
-        return 2*k - 2*logl
-
-    def BIC(logl,k,n):
-        return np.log(n)*k - 2*logl
-
-    return AIC, BIC, compute_logLikelihood
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # generalized fitting
-    """)
-    return
-
-
-@app.cell
-def _(np):
-    from lmfit import Model
-    # ───────────────────────────────────────────────────────────────────────
-    #  MODEL SPECIFICATION SYSTEM
-    # ───────────────────────────────────────────────────────────────────────
-
-    class BaseModelSpec:
-        """Abstract interface for pluggable models."""
-        name = "base"
-
-        def model_func(self, x, **params):
-            raise NotImplementedError
-
-        def make_params(self, model, amplitude_thresh, center_init, center_range,
-                        sigma_init, sigma_min, sigma_max):
-            raise NotImplementedError
-
-        def reconstruct(self, x, params, row_display):
-            """Return fitted curve in original scale."""
-            raise NotImplementedError
-
-        def param_names(self):
-            """Return list of parameter names to extract."""
-            raise NotImplementedError
-
-    class SplitGaussianSpec(BaseModelSpec):
-        name = "split_gaussian"
-
-        def model_func(self, x, amplitude, center, sigma_left, sigma_right):
-            sigma = np.where(x < center, sigma_left, sigma_right)
-            return amplitude * np.exp(-0.5 * ((x - center) / sigma)**2)
-
-        def make_params(self, model, amplitude_thresh, center_init, center_range,
-                        sigma_init, sigma_min, sigma_max):
-            return model.make_params(
-                amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
-                center=dict(value=center_init,
-                            min=center_init - center_range,
-                            max=center_init + center_range),
-                sigma_left=dict(value=sigma_init, min=sigma_min, max=sigma_max),
-                sigma_right=dict(value=sigma_init, min=sigma_min, max=sigma_max),
-            )
-
-        def reconstruct(self, x, params, row_display):
-            return self.model_func(
-                x,
-                amplitude=row_display.max(),
-                center=params['center'],
-                sigma_left=params['sigma_left'],
-                sigma_right=params['sigma_right'],
-            )
-
-        def param_names(self):
-            return ["center", "sigma_left", "sigma_right", "amplitude"]
-
-    class GaussianSpec(BaseModelSpec):
-        name = "gaussian"
-
-        def model_func(self, x, amplitude, center, sigma):
-            return amplitude * np.exp(-0.5 * ((x - center) / sigma)**2)
-
-        def make_params(self, model, amplitude_thresh, center_init, center_range,
-                        sigma_init, sigma_min, sigma_max):
-            return model.make_params(
-                amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
-                center=dict(value=center_init,
-                            min=center_init - center_range,
-                            max=center_init + center_range),
-                sigma=dict(value=sigma_init, min=sigma_min, max=sigma_max),
-            )
-
-        def reconstruct(self, x, params, row_display):
-            return self.model_func(
-                x,
-                amplitude=row_display.max(),
-                center=params['center'],
-                sigma=params['sigma'],
-            )
-
-        def param_names(self):
-            return ["center", "sigma", "amplitude"]
-
-
-    class TwoSidedExpSpec(BaseModelSpec):
-        name = "two_sided_exp(Laplace)"
-
-        def model_func(self, x, amplitude, center, sigma_left, sigma_right):
-            b = np.where(x < center, sigma_left, sigma_right)
-            return amplitude * np.exp(-np.abs(x - center) / b)
-
-        def make_params(self, model, amplitude_thresh, center_init, center_range,
-                        sigma_init, sigma_min, sigma_max):
-            return model.make_params(
-                amplitude=dict(value=1.0, min=amplitude_thresh, max=1.5),
-                center=dict(value=center_init,
-                            min=center_init - center_range,
-                            max=center_init + center_range),
-                sigma_left=dict(value=sigma_init, min=sigma_min, max=sigma_max),
-                sigma_right=dict(value=sigma_init, min=sigma_min, max=sigma_max),
-            )
-
-        def reconstruct(self, x, params, row_display):
-            return self.model_func(
-                x,
-                amplitude=row_display.max(),
-                center=params['center'],
-                sigma_left=params['sigma_left'],
-                sigma_right=params['sigma_right'],
-            )
-
-        def param_names(self):
-            return ["center", "sigma_left", "sigma_right", "amplitude"]
-
-    return GaussianSpec, Model, SplitGaussianSpec, TwoSidedExpSpec
-
-
-@app.cell
-def _(Model, np, smooth_mi_map):
-    def fit_single_ridge(row, lags, model_spec,
-                         prev_params=None,
-                         center_init=0.0, center_range=150.0,
-                         sigma_init=30.0, sigma_min=2.0, sigma_max=400.0,
-                         amplitude_thresh=0.05):
-        model = Model(model_spec.model_func)
-
-        baseline = np.percentile(row, 10)
-        row_centered = row - baseline
-        row_range = row_centered.max()
-
-        if row_range < amplitude_thresh:
-            return None, False
-
-        row_norm = row_centered / row_range
-
-        if prev_params is not None:
-            params = prev_params.copy()
-            params['center'].set(
-                min=params['center'].value - center_range,
-                max=params['center'].value + center_range,
-            )
-            params['amplitude'].set(value=1.0, min=amplitude_thresh, max=1.5)
-        else:
-            params = model_spec.make_params(
-                model,
-                amplitude_thresh,
-                center_init,
-                center_range,
-                sigma_init,
-                sigma_min,
-                sigma_max,
-            )
-
-        try:
-            result = model.fit(row_norm, params, x=lags)
-        except Exception:
-            return None, False
-
-        p = result.params
-        amp = p['amplitude'].value
-        center = p['center'].value
-
-        failed = (
-            not result.success
-            or amp < amplitude_thresh
-            or not (lags[0] < center < lags[-1])
-            or result.redchi > 1.0
-        )
-
-        if failed:
-            return None, False
-
-        result.row_range = row_range
-        result.baseline = baseline
-        return result, True
-
-    def extract_single_ridge_lmfit(mi_map, scales, lags, model_spec,
-                                   smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
-                                   center_init=0.0, center_range=150.0,
-                                   sigma_init=30.0, sigma_max=400.0,
-                                   amplitude_thresh=0.05,
-                                   fit_window=None):
-        sm = smooth_mi_map(mi_map,
-                           sigma_scale=smooth_sigma_scale,
-                           sigma_lag=smooth_sigma_lag)
-
-        if fit_window is not None:
-            lo, hi = fit_window
-            mask = (lags >= lo) & (lags <= hi)
-            lags_fit = lags[mask]
-            sm_fit = sm[:, mask]
-        else:
-            lags_fit = lags
-            sm_fit = sm
-
-        param_names = model_spec.param_names()
-        param_arrays = {name: np.full(len(scales), np.nan) for name in param_names}
-        success = np.zeros(len(scales), dtype=bool)
-        #aic,bic
-        fit_scores = {"aic":np.full(len(scales), np.nan),"bic":np.full(len(scales), np.nan)}
-
-        prev_params = None
-        fail_streak = 0
-        MAX_FAILS = 5
-
-        for i in range(len(scales) - 1, -1, -1):
-            row = sm_fit[i]
-
-            result, ok = fit_single_ridge(
-                row, lags_fit, model_spec,
-                prev_params=prev_params,
-                center_init=center_init,
-                center_range=center_range,
-                sigma_init=sigma_init,
-                sigma_max=sigma_max,
-                amplitude_thresh=amplitude_thresh,
-            )
-
-            if ok:
-                for name in param_names:
-                    param_arrays[name][i] = result.params[name].value
-                param_arrays["amplitude"][i] *= result.row_range
-                success[i] = True
-                fit_scores["aic"][i] = result.aic 
-                fit_scores["bic"][i] = result.bic 
-                prev_params = result.params
-                fail_streak = 0
-            else:
-                fail_streak += 1
-                if fail_streak >= MAX_FAILS:
-                    prev_params = None
-                    fail_streak = 0
-
-        return param_arrays, success,fit_scores
-
-
-    return (extract_single_ridge_lmfit,)
-
-
-@app.cell
-def _(SplitGaussianSpec, extract_single_ridge_lmfit, np, plt, smooth_mi_map):
-    def plot_fit_at_scale(ax, sm, lags, scales, param_arrays, success,
-                          model_spec, target_scale=100.0):
-        i = np.argmin(np.abs(scales - target_scale))
-        row = sm[i]
-
-        baseline = np.percentile(row, 10)
-        row_display = row - baseline
-
-        ax.scatter(lags, row_display, s=6, color='steelblue', alpha=0.6)
-
-        if success[i]:
-            params = {name: param_arrays[name][i] for name in model_spec.param_names()}
-            fitted = model_spec.reconstruct(lags, params, row_display)
-            ax.plot(lags, fitted, 'r-', lw=1.8)
-            ax.axvline(params["center"], color='white', lw=1.0, ls='--')
-
-        ax.set_xlabel("Lag τ")
-        ax.set_ylabel("MI (baseline sub.)")
-
-    def plot_single_ridge_lmfit(mi_map, scales, lags,
-                                 param_arrays, success,
-                                 model_spec,
-                                 title="",
-                                 smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
-                                 diagnostic_scale=100.0):
-        sm = smooth_mi_map(mi_map, smooth_sigma_scale, smooth_sigma_lag)
-
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10),
-                                 gridspec_kw={'width_ratios': [3, 1],
-                                              'height_ratios': [2, 1]})
-
-        # ── top-left: heatmap + ridge curves ──────────────────────────────
-        ax = axes[0, 0]
-        pcm = ax.pcolormesh(lags, scales, sm, cmap='viridis', shading='auto')
-        ax.set_yscale('log')
-        ax.set_xlabel('Lag τ')
-        ax.set_ylabel('Scale s')
-        ax.set_title(f"{title} — model={model_spec.name}")
-        plt.colorbar(pcm, ax=ax, label='MI')
-
-        centers = param_arrays["center"]
-        s_ok = scales[success]
-        c_ok = centers[success]
-
-        # center curve
-        ax.plot(c_ok, s_ok, 'w--', lw=1.5, label='center')
-
-        # ridge edges: depend on model
-        if model_spec.name == "split_gaussian" or model_spec.name == "two_sided_exp(Laplace)":
-            sl_ok = param_arrays["sigma_left"][success]
-            sr_ok = param_arrays["sigma_right"][success]
-            ax.plot(c_ok - sl_ok, s_ok, color='cyan', lw=1, ls=':', label='−σ_left')
-            ax.plot(c_ok + sr_ok, s_ok, color='orange', lw=1, ls=':', label='+σ_right')
-        elif model_spec.name == "gaussian" or model_spec.name == "two_sided_exp(Laplace)":
-            sigma_ok = param_arrays["sigma"][success]
-            ax.plot(c_ok - sigma_ok, s_ok, color='cyan', lw=1, ls=':', label='−σ')
-            ax.plot(c_ok + sigma_ok, s_ok, color='orange', lw=1, ls=':', label='+σ')
-
-        if diagnostic_scale is not None:
-            ax.axhline(diagnostic_scale, color='red', lw=0.8, ls='--', alpha=0.6)
-
-        s_fail = scales[~success]
-        if len(s_fail):
-            ax.scatter(np.zeros(len(s_fail)), s_fail, c='red', s=4, zorder=5)
-
-        ax.legend(fontsize=8)
-
-        # ── top-right: diagnostics ────────────────────────────────────────
-        ax2 = axes[0, 1]
-        ax2.set_title("Diagnostics")
-
-        if model_spec.name == "split_gaussian" or model_spec.name == "two_sided_exp(Laplace)":
-            sl_ok = param_arrays["sigma_left"][success]
-            sr_ok = param_arrays["sigma_right"][success]
-            ratio = sr_ok / sl_ok
-            ax2.plot(ratio, s_ok, 'k-o', ms=2)
-            ax2.axvline(1.0, color='gray', lw=0.8, ls='--')
-            ax2.set_xscale('log')
-            ax2.set_yscale('log')
-            ax2.set_xlabel('σ_right / σ_left')
-            ax2.set_ylabel('Scale s')
-        else:
-            ax2.text(0.1, 0.5, "No asymmetry diagnostics\nfor this model",
-                     transform=ax2.transAxes)
-
-        # ── bottom-left: single-scale fit diagnostic ──────────────────────
-        if diagnostic_scale is not None:
-            ax3 = axes[1, 0]
-            ax3.set_facecolor('#1a1a2e')
-            plot_fit_at_scale(ax3, sm, lags, scales,
-                              param_arrays, success,
-                              model_spec,
-                              target_scale=diagnostic_scale)
-        else:
-            axes[1, 0].axis('off')
-
-        # ── bottom-right: unused ──────────────────────────────────────────
-        axes[1, 1].axis('off')
-
-        plt.tight_layout()
-        plt.show()
-
-
-
-
-    def extract_single_ridge_and_plot(
-            mi_map=None, scales=None, lags=None,
-            title="",
-            center_init=0.0, center_range=150.0,
-            sigma_init=30.0, sigma_max=200.0,
-            amplitude_thresh=0.05,
-            smooth_sigma_scale=2.0, smooth_sigma_lag=2.0,
-            diagnostic_scale=100.0,
-            fit_window=None,
-            model_spec=SplitGaussianSpec(),   # NEW DEFAULT
-    ):
-        mi_map = np.array(mi_map)
-
-        param_arrays, ok, fit_scores = extract_single_ridge_lmfit(
-            mi_map, scales, lags, model_spec,
-            smooth_sigma_scale=smooth_sigma_scale,
-            smooth_sigma_lag=smooth_sigma_lag,
-            center_init=center_init,
-            center_range=center_range,
-            sigma_init=sigma_init,
-            sigma_max=sigma_max,
-            amplitude_thresh=amplitude_thresh,
-            fit_window=fit_window,
-        )
-
-        plot_single_ridge_lmfit(
-            mi_map, scales, lags,
-            param_arrays, ok,
-            model_spec=model_spec,
-            title=title,
-            smooth_sigma_scale=smooth_sigma_scale,
-            smooth_sigma_lag=smooth_sigma_lag,
-            diagnostic_scale=diagnostic_scale
-        )
-
-        print(f"Successful fits: {ok.sum()} / {len(ok)}")
-        print(f"AICs: {fit_scores["aic"]}")
-        print(f"BICs: {fit_scores["bic"]}")
-
-        return param_arrays, ok, fit_scores
-
-
-
-    return (extract_single_ridge_and_plot,)
-
-
-@app.cell
-def _():
-    # snp_fits_generalized=[]
-    # for _i,_ in enumerate(results_snp_merged):
-    #     snp_fits_generalized.append(extract_single_ridge_and_plot(
-    #         mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
-    #         scales          = scales,
-    #         lags            = np.linspace(-800, 800, 801),
-    #         title           = "S&P500",
-    #         center_init     = 0.0,
-    #         center_range    = 100.0,
-    #         sigma_init      = 20.0,
-    #         sigma_max       = 200.0,       # tighter than before
-    #         amplitude_thresh= 0.05,
-    #         diagnostic_scale=None,
-    #         fit_window      = (-300, 300), # ignore flat tails entirely
-    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
-    #         model_spec=SplitGaussianSpec(),   # NEW DEFAULT
-    #     ))
-    return
-
-
-@app.cell
-def _():
-    # snp_fits_generalized_gauss=[]
-    # for _i,_ in enumerate(results_snp_merged):
-    #     snp_fits_generalized_gauss.append(extract_single_ridge_and_plot(
-    #         mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
-    #         scales          = scales,
-    #         lags            = np.linspace(-800, 800, 801),
-    #         title           = "S&P500",
-    #         center_init     = 0.0,
-    #         center_range    = 100.0,
-    #         sigma_init      = 20.0,
-    #         sigma_max       = 200.0,       # tighter than before
-    #         amplitude_thresh= 0.05,
-    #         diagnostic_scale=None,
-    #         fit_window      = (-300, 300), # ignore flat tails entirely
-    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
-    #         model_spec=GaussianSpec(),   # NEW DEFAULT
-    #     ))
-    return
-
-
-@app.cell
-def _():
-    # snp_fits_exp_generalized=[]
-    # for _i,_ in enumerate(results_snp_merged):
-    #     snp_fits_exp_generalized.append(extract_single_ridge_and_plot(
-    #         mi_map          = np.array(results_snp_merged[_i]["S&P500"]["mi_map_normalized"]),
-    #         scales          = scales,
-    #         lags            = np.linspace(-800, 800, 801),
-    #         title           = "S&P500",
-    #         center_init     = 0.0,
-    #         center_range    = 100.0,
-    #         sigma_init      = 20.0,
-    #         sigma_max       = 200.0,       # tighter than before
-    #         amplitude_thresh= 0.05,
-    #         diagnostic_scale=None,
-    #         fit_window      = (-300, 300), # ignore flat tails entirely
-    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
-    #         model_spec=TwoSidedExpSpec(),   # NEW DEFAULT
-    #     ))
-    return
-
-
-@app.cell
-def _():
-    # btc_fits_generalized=[]
-    # for _i,_ in enumerate(results_btc_merged):
-    #     btc_fits_generalized.append(extract_single_ridge_and_plot(
-    #         mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
-    #         scales          = scales,
-    #         lags            = np.linspace(-800, 800, 801),
-    #         title           = "BTC",
-    #         center_init     = 0.0,
-    #         center_range    = 100.0,
-    #         sigma_init      = 20.0,
-    #         sigma_max       = 200.0,       # tighter than before
-    #         amplitude_thresh= 0.05,
-    #         diagnostic_scale=None,
-    #         fit_window      = (-300, 300), # ignore flat tails entirely
-    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
-    #         model_spec=SplitGaussianSpec(),   # NEW DEFAULT
-    #     ))
-    return
-
-
-@app.cell
-def _():
-    # btc_fits_generalized_gauss=[]
-    # for _i,_ in enumerate(results_btc_merged):
-    #     btc_fits_generalized_gauss.append(extract_single_ridge_and_plot(
-    #         mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
-    #         scales          = scales,
-    #         lags            = np.linspace(-800, 800, 801),
-    #         title           = "BTC",
-    #         center_init     = 0.0,
-    #         center_range    = 100.0,
-    #         sigma_init      = 20.0,
-    #         sigma_max       = 200.0,       # tighter than before
-    #         amplitude_thresh= 0.05,
-    #         diagnostic_scale=None,
-    #         fit_window      = (-300, 300), # ignore flat tails entirely
-    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
-    #         model_spec=GaussianSpec(),   # NEW DEFAULT
-    #     ))
-    return
-
-
-@app.cell
-def _():
-    # btc_fits_exp_generalized=[]
-    # for _i,_ in enumerate(results_btc_merged):
-    #     btc_fits_exp_generalized.append(extract_single_ridge_and_plot(
-    #         mi_map          = np.array(results_btc_merged[_i]["BTC"]["mi_map_normalized"]),
-    #         scales          = scales,
-    #         lags            = np.linspace(-800, 800, 801),
-    #         title           = "BTC",
-    #         center_init     = 0.0,
-    #         center_range    = 100.0,
-    #         sigma_init      = 20.0,
-    #         sigma_max       = 200.0,       # tighter than before
-    #         amplitude_thresh= 0.05,
-    #         diagnostic_scale=None,
-    #         fit_window      = (-300, 300), # ignore flat tails entirely
-    #         smooth_sigma_lag= 0,smooth_sigma_scale=0,
-    #         model_spec=TwoSidedExpSpec(),   # NEW DEFAULT
-    #     ))
     return
 
 
 @app.cell
 def _(
     btc_fits_exp_generalized,
-    btc_fits_generalized,
-    btc_fits_generalized_gauss,
-    np,
+    compute_auc_per_scale,
+    fill_pool,
+    parameters,
     snp_fits_exp_generalized,
-    snp_fits_generalized,
-    snp_fits_generalized_gauss,
 ):
-    np.save("btc_fits_generalized_score.npy",np.array(btc_fits_generalized, dtype=object))
-    np.save("btc_fits_generalized_score_gauss.npy",np.array(btc_fits_generalized_gauss, dtype=object))
-    np.save("snp_fits_generalized_score.npy",np.array(snp_fits_generalized, dtype=object))
-    np.save("snp_fits_generalized_score_gauss.npy",np.array(snp_fits_generalized_gauss, dtype=object))
-    np.save("snp_fits_generalized_score_exp.npy",np.array(snp_fits_exp_generalized, dtype=object))
-    np.save("btc_fits_generalized_score_exp.npy",np.array(btc_fits_exp_generalized, dtype=object))
+    sample_pool_exp = {
+        "BTC": {param: {} for param in parameters},
+        "S&P":  {param: {} for param in parameters}
+    }
+
+    fill_pool(sample_pool_exp, "BTC", btc_fits_exp_generalized)
+    fill_pool(sample_pool_exp, "S&P", snp_fits_exp_generalized)
+
+    auc_sigma_left_exp  = compute_auc_per_scale(sample_pool_exp, "sigma_left")
+    auc_sigma_right_exp = compute_auc_per_scale(sample_pool_exp, "sigma_right")
+    auc_center_exp      = compute_auc_per_scale(sample_pool_exp, "center")
+
+    return auc_center_exp, auc_sigma_left_exp, auc_sigma_right_exp
+
+
+@app.cell
+def _(auc_center_exp, auc_sigma_left_exp, auc_sigma_right_exp, plot_auc_curve):
+    plot_auc_curve(auc_sigma_left_exp,  "AUC of sigma_left vs scale(exp)")
+    plot_auc_curve(auc_sigma_right_exp, "AUC of sigma_right vs scale(exp)")
+    plot_auc_curve(auc_center_exp,      "AUC of center vs scale(exp)")
+
+    return
+
+
+@app.cell
+def _():
     return
 
 
